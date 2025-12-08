@@ -5,12 +5,11 @@ import os
 
 app = Flask(__name__)
 
-# --- SECRETS (NO expuestos al cliente) ---
+# --- SECRETS ---
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
 
-# --- Obtener Access Token ---
 def get_access_token():
     url = "https://api.dropbox.com/oauth2/token"
     data = {
@@ -23,7 +22,6 @@ def get_access_token():
     r.raise_for_status()
     return r.json()["access_token"]
 
-# --- Descargar licencia ---
 def download_license(username):
     token = get_access_token()
     url = "https://content.dropboxapi.com/2/files/download"
@@ -35,7 +33,6 @@ def download_license(username):
     r.raise_for_status()
     return r.text
 
-# --- Subir licencia ---
 def upload_license(username, content):
     token = get_access_token()
     url = "https://content.dropboxapi.com/2/files/upload"
@@ -48,7 +45,6 @@ def upload_license(username, content):
     r.raise_for_status()
     return True
 
-# --- Endpoint validar login ---
 @app.route("/validate", methods=["POST"])
 def validate():
     data = request.json
@@ -67,25 +63,30 @@ def validate():
             k, v = line.split("=", 1)
             lic[k.strip()] = v.strip()
 
-    # password check
+    # Password check
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Incorrect password"}), 403
 
-    # expiration check
+    # Expiration check
     expire_date = datetime.fromisoformat(lic["expires"])
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "License expired"}), 403
 
-    # HWID handling
-    if not lic.get("hwid") and hwid:
-        lic["hwid"] = hwid
-        upload_license(username, "\n".join([f"{k}={v}" for k, v in lic.items()]))
+    # GLOBAL FLAG
+    is_global = lic.get("global", "").lower() == "true"
+
+    # HWID HANDLING FINAL
+    if not is_global:  # solo registra HWID si NO es global
+        if not lic.get("hwid") and hwid:
+            lic["hwid"] = hwid
+            upload_license(username, "\n".join([f"{k}={v}" for k, v in lic.items()]))
 
     return jsonify({
         "error": False,
         "status": "Login successful",
         "license": lic
     })
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
