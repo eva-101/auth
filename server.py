@@ -4,8 +4,7 @@ from datetime import datetime
 import os
 
 app = Flask(__name__)
-
-# --- SECRETS ---
+ 
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
@@ -62,21 +61,18 @@ def validate():
         if "=" in line:
             k, v = line.split("=", 1)
             lic[k.strip()] = v.strip()
-
-    # Password check
+ 
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Incorrect password"}), 403
-
-    # Expiration check
+ 
     expire_date = datetime.fromisoformat(lic["expires"])
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "License expired"}), 403
-
-    # GLOBAL FLAG
+ 
     is_global = lic.get("global", "").lower() == "true"
 
     # HWID HANDLING FINAL
-    if not is_global:  # solo registra HWID si NO es global
+    if not is_global:  
         if not lic.get("hwid") and hwid:
             lic["hwid"] = hwid
             upload_license(username, "\n".join([f"{k}={v}" for k, v in lic.items()]))
@@ -91,3 +87,4 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
