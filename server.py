@@ -10,7 +10,6 @@ APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
 
 def get_access_token():
-    """Obtiene un access token de Dropbox usando refresh token."""
     url = "https://api.dropbox.com/oauth2/token"
     data = {
         "grant_type": "refresh_token",
@@ -23,7 +22,6 @@ def get_access_token():
     return r.json()["access_token"]
 
 def download_license(username):
-    """Descarga el archivo de licencia desde Dropbox."""
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -34,7 +32,6 @@ def download_license(username):
     return r.text
 
 def upload_license(username, content):
-    """Sube el archivo de licencia a Dropbox (overwrite)."""
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -47,8 +44,18 @@ def upload_license(username, content):
 
 @app.route("/validate", methods=["POST"])
 def validate():
-    """Valida la licencia enviada por el cliente."""
+
     data = request.json
+
+    # ================================
+    #   🔥 MODO PING PARA EL BOT 🔥
+    # ================================
+    if data.get("username") == "PING_KEEPALIVE":
+        return jsonify({
+            "error": False,
+            "status": "PING_OK"
+        }), 200
+    # ================================
 
     username = data.get("username")
     password = data.get("password", "")
@@ -59,28 +66,22 @@ def validate():
     disk = data.get("disk", "")
     ip = data.get("ip", "")
 
-    # Descarga la licencia
     try:
         content = download_license(username)
     except:
         return jsonify({"error": True, "status": "User not found"}), 404
 
-    # Convierte a diccionario
     lic = dict(line.split("=", 1) for line in content.split("\n") if "=" in line)
 
-    # Password
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Incorrect password"}), 403
 
-    # Fecha de expiración
     expire_date = datetime.fromisoformat(lic.get("expires", "2100-01-01T00:00:00"))
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "License expired"}), 403
 
-    # Licencia global
     is_global = lic.get("global","false").lower() == "true"
 
-    # Si no es global, rellenar info de hardware si está vacía
     if not is_global:
         updated = False
         for key, value in [("hwid", hwid), ("cpu_id", cpu_id), ("ram", ram),
@@ -91,12 +92,10 @@ def validate():
         if updated:
             upload_license(username, "\n".join([f"{k}={v}" for k,v in lic.items()]))
 
-        # Validación estricta
         for key, value in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
             if value and lic.get(key) and value != lic.get(key):
                 return jsonify({"error": True, "status": f"{key.upper()} mismatch"}), 403
 
-    # Respuesta final
     response = {
         "error": False,
         "status": "Login successful",
