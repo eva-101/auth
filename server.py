@@ -4,38 +4,52 @@ from datetime import datetime
 
 app = Flask(__name__)
 
+# Variables de entorno en Render o localmente
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
 
 def get_access_token():
+    """Obtiene un access token de Dropbox usando refresh token."""
     url = "https://api.dropbox.com/oauth2/token"
-    data = {"grant_type": "refresh_token","refresh_token": REFRESH_TOKEN,
-            "client_id": APP_KEY,"client_secret": APP_SECRET}
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": REFRESH_TOKEN,
+        "client_id": APP_KEY,
+        "client_secret": APP_SECRET
+    }
     r = requests.post(url, data=data)
     r.raise_for_status()
     return r.json()["access_token"]
 
 def download_license(username):
+    """Descarga el archivo de licencia desde Dropbox."""
     token = get_access_token()
-    headers = {"Authorization": f"Bearer {token}",
-               "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt"}}'}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt"}}'
+    }
     r = requests.post("https://content.dropboxapi.com/2/files/download", headers=headers)
     r.raise_for_status()
     return r.text
 
 def upload_license(username, content):
+    """Sube el archivo de licencia a Dropbox (overwrite)."""
     token = get_access_token()
-    headers = {"Authorization": f"Bearer {token}",
-               "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt", "mode": "overwrite"}}',
-               "Content-Type": "application/octet-stream"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt", "mode": "overwrite"}}',
+        "Content-Type": "application/octet-stream"
+    }
     r = requests.post("https://content.dropboxapi.com/2/files/upload", headers=headers, data=content.encode())
     r.raise_for_status()
     return True
 
 @app.route("/validate", methods=["POST"])
 def validate():
+    """Valida la licencia enviada por el cliente."""
     data = request.json
+
     username = data.get("username")
     password = data.get("password", "")
     hwid = data.get("hwid", "")
@@ -45,26 +59,31 @@ def validate():
     disk = data.get("disk", "")
     ip = data.get("ip", "")
 
+    # Descarga la licencia
     try:
         content = download_license(username)
     except:
         return jsonify({"error": True, "status": "User not found"}), 404
 
+    # Convierte a diccionario
     lic = dict(line.split("=", 1) for line in content.split("\n") if "=" in line)
 
+    # Password
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Incorrect password"}), 403
 
-    expire_date = datetime.fromisoformat(lic["expires"])
+    # Fecha de expiración
+    expire_date = datetime.fromisoformat(lic.get("expires", "2100-01-01T00:00:00"))
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "License expired"}), 403
 
-    is_global = lic.get("global","").lower() == "true"
+    # Licencia global
+    is_global = lic.get("global","false").lower() == "true"
 
-    # HWID + INFO
+    # Si no es global, rellenar info de hardware si está vacía
     if not is_global:
         updated = False
-        for key, value in [("hwid", hwid), ("cpu_id", cpu_id), ("ram", ram), 
+        for key, value in [("hwid", hwid), ("cpu_id", cpu_id), ("ram", ram),
                            ("mac", mac), ("disk", disk), ("ip", ip)]:
             if value and not lic.get(key):
                 lic[key] = value
@@ -72,13 +91,19 @@ def validate():
         if updated:
             upload_license(username, "\n".join([f"{k}={v}" for k,v in lic.items()]))
 
-    # Validación estricta
-    if not is_global:
+        # Validación estricta
         for key, value in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
             if value and lic.get(key) and value != lic.get(key):
                 return jsonify({"error": True, "status": f"{key.upper()} mismatch"}), 403
 
-    return jsonify({"error": False, "status": "Login successful", "license": lic})
+    # Respuesta final
+    response = {
+        "error": False,
+        "status": "Login successful",
+        "license": lic
+    }
+
+    return jsonify(response), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
