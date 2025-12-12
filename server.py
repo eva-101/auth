@@ -4,7 +4,6 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Variables de entorno en Render o localmente
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
@@ -47,15 +46,12 @@ def validate():
 
     data = request.json
 
-    # ================================
-    #   🔥 MODO PING PARA EL BOT 🔥
-    # ================================
+
     if data.get("username") == "PING_KEEPALIVE":
         return jsonify({
             "error": False,
             "status": "PING_OK"
         }), 200
-    # ================================
 
     username = data.get("username")
     password = data.get("password", "")
@@ -107,3 +103,4 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
