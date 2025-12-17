@@ -45,7 +45,7 @@ def upload_license(username, content):
 def list_files(folder_path="/Aplicaciones/editrojson/loader"):
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
-    data = {"path": folder_path, "recursive": True}  # <-- importante
+    data = {"path": folder_path, "recursive": False}  # false si solo quieres esa carpeta
     r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
     r.raise_for_status()
     files = r.json().get("entries", [])
@@ -72,6 +72,7 @@ def list_files(folder_path="/Aplicaciones/editrojson/loader"):
             print(f"No se pudo crear link para {f['name']}: {e}")
             continue
     return urls
+
 
 
 
@@ -146,6 +147,7 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
