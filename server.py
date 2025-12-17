@@ -41,10 +41,11 @@ def upload_license(username, content):
     r.raise_for_status()
     return True
 
-def list_files(folder_path="/loader"):
+ 
+def list_files(folder_path="/Aplicaciones/editrojson/loader"):
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
-    data = {"path": folder_path, "recursive": False}
+    data = {"path": folder_path, "recursive": True}  # <-- importante
     r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
     r.raise_for_status()
     files = r.json().get("entries", [])
@@ -59,7 +60,7 @@ def list_files(folder_path="/loader"):
                 "https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings",
                 headers=headers, json=link_data
             )
-            if link_resp.status_code == 409:  # link ya existe
+            if link_resp.status_code == 409:
                 link_resp = requests.post(
                     "https://api.dropboxapi.com/2/sharing/list_shared_links",
                     headers=headers, json={"path": f['path_lower'], "direct_only": True}
@@ -145,6 +146,7 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
