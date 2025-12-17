@@ -41,11 +41,35 @@ def upload_license(username, content):
     r.raise_for_status()
     return True
 
+def list_files(folder_path="/loader"):
+    token = get_access_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    data = {"path": folder_path, "recursive": False}
+    r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
+    r.raise_for_status()
+    files = r.json().get("entries", [])
+
+    urls = []
+    for f in files:
+        if f[".tag"] == "file":
+            # crear link compartido
+            link_data = {"path": f['path_lower'], "short_url": False, "requested_visibility": "public"}
+            link_resp = requests.post("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings",
+                                      headers=headers, json=link_data)
+            if link_resp.status_code == 409:  # si ya existe link
+                link_resp = requests.post("https://api.dropboxapi.com/2/sharing/list_shared_links",
+                                          headers=headers, json={"path": f['path_lower'], "direct_only": True})
+            link_resp.raise_for_status()
+            url = link_resp.json()["url"]
+            # cambiar ?dl=0 a ?dl=1 para descarga directa
+            url = url.replace("?dl=0", "?dl=1")
+            urls.append(url)
+    return urls
+
 @app.route("/validate", methods=["POST"])
 def validate():
 
     data = request.json
-
 
     if data.get("username") == "PING_KEEPALIVE":
         return jsonify({
@@ -92,10 +116,20 @@ def validate():
             if value and lic.get(key) and value != lic.get(key):
                 return jsonify({"error": True, "status": f"{key.upper()} mismatch"}), 403
 
+    # -----------------------------
+    # OBTENER URLS DE ARCHIVOS DEL LOADER
+    # -----------------------------
+    try:
+        file_urls = list_files("/loader")
+    except Exception as e:
+        file_urls = []
+        print("Error al obtener archivos de Dropbox:", e)
+
     response = {
         "error": False,
         "status": "Login successful",
-        "license": lic
+        "license": lic,
+        "files": file_urls  # <-- URLs de los archivos en loader
     }
 
     return jsonify(response), 200
@@ -103,4 +137,3 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
