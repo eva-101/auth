@@ -84,16 +84,14 @@ def list_files(folder_path="/loader"):
     }
 
     # 1️⃣ Listar archivos
-    data = {
-        "path": folder_path,
-        "recursive": True,
-        "include_deleted": False
-    }
-
     r = requests.post(
         "https://api.dropboxapi.com/2/files/list_folder",
         headers=headers,
-        json=data
+        json={
+            "path": folder_path,
+            "recursive": True,
+            "include_deleted": False
+        }
     )
     r.raise_for_status()
 
@@ -103,64 +101,32 @@ def list_files(folder_path="/loader"):
     urls = []
 
     for f in entries:
-        # 2️⃣ Solo archivos válidos
         if f.get(".tag") != "file":
-            continue
-
-        if not f.get("is_downloadable", True):
             continue
 
         path = f.get("path_lower")
         if not path:
             continue
 
-        # 3️⃣ Crear o reutilizar shared link
         try:
+            # 2️⃣ Obtener link temporal (NO sharing)
             link_resp = requests.post(
-                "https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings",
+                "https://api.dropboxapi.com/2/files/get_temporary_link",
                 headers=headers,
                 json={"path": path}
             )
+            link_resp.raise_for_status()
 
-            if link_resp.status_code == 409:
-                # Ya existe → buscarlo
-                link_resp = requests.post(
-                    "https://api.dropboxapi.com/2/sharing/list_shared_links",
-                    headers=headers,
-                    json={
-                        "path": path,
-                        "direct_only": True
-                    }
-                )
-
-                links = link_resp.json().get("links", [])
-                if not links:
-                    print(f"No shared link for {path}")
-                    continue
-
-                url = links[0]["url"]
-            else:
-                link_resp.raise_for_status()
-                url = link_resp.json().get("url")
-
-            if not url:
-                continue
-
-            # 4️⃣ Forzar descarga directa
-            url = url.replace("?dl=0", "?dl=1")
-            urls.append(url)
+            url = link_resp.json().get("link")
+            if url:
+                urls.append(url)
 
         except Exception as e:
-            print(f"No se pudo generar link para {f.get('name')}: {e}")
+            print(f"No se pudo generar temp link para {f.get('name')}: {e}")
 
     return urls
 
-
-
-
-
-
-
+ 
 @app.route("/validate", methods=["POST"])
 def validate():
 
@@ -234,3 +200,4 @@ if __name__ == "__main__":
     test_root()  # <-- ver qué carpetas ve Dropbox
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
