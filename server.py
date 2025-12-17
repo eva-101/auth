@@ -52,19 +52,26 @@ def list_files(folder_path="/loader"):
     urls = []
     for f in files:
         if f[".tag"] == "file":
-            # crear link compartido
-            link_data = {"path": f['path_lower'], "short_url": False, "requested_visibility": "public"}
-            link_resp = requests.post("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings",
-                                      headers=headers, json=link_data)
-            if link_resp.status_code == 409:  # si ya existe link
-                link_resp = requests.post("https://api.dropboxapi.com/2/sharing/list_shared_links",
-                                          headers=headers, json={"path": f['path_lower'], "direct_only": True})
-            link_resp.raise_for_status()
-            url = link_resp.json()["url"]
-            # cambiar ?dl=0 a ?dl=1 para descarga directa
-            url = url.replace("?dl=0", "?dl=1")
-            urls.append(url)
+            link_data = {"path": f['path_lower']}
+            try:
+                link_resp = requests.post(
+                    "https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings",
+                    headers=headers, json=link_data
+                )
+                if link_resp.status_code == 409:  # link ya existe
+                    link_resp = requests.post(
+                        "https://api.dropboxapi.com/2/sharing/list_shared_links",
+                        headers=headers, json={"path": f['path_lower'], "direct_only": True}
+                    )
+                link_resp.raise_for_status()
+                url = link_resp.json()["url"]
+                url = url.replace("?dl=0", "?dl=1")
+                urls.append(url)
+            except Exception as e:
+                print(f"No se pudo crear link para {f['name']}: {e}")
+                continue
     return urls
+
 
 @app.route("/validate", methods=["POST"])
 def validate():
@@ -135,7 +142,8 @@ def validate():
     return jsonify(response), 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    print("Dropbox loader files:", list_files("/loader"))
+    port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
+
 
