@@ -31,12 +31,17 @@ def download_license(username):
     return r.text
     
 def test_root():
-    token = get_access_token()
-    headers = {"Authorization": f"Bearer {token}"}
-    data = {"path": "", "recursive": False}  # raíz del token de la app
-    r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
-    r.raise_for_status()
-    print("DEBUG - root entries:", r.json().get("entries", []))
+    print("=== Probando list_files('/loader') ===")
+    try:
+        urls = list_files("/loader")
+        if not urls:
+            print("No files found in /loader")
+        else:
+            for u in urls:
+                print(u)
+    except Exception as e:
+        print("Error al listar archivos:", e)
+
 
 def upload_license(username, content):
     token = get_access_token()
@@ -53,12 +58,12 @@ def upload_license(username, content):
 def list_files(folder_path="/loader"):
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
-    data = {"path": folder_path, "recursive": False}  # solo esa carpeta
+    data = {"path": folder_path, "recursive": True}  # <-- ahora sí recursivo
     r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
     r.raise_for_status()
     files = r.json().get("entries", [])
-    
-    print("DEBUG - entries:", files)  # para depuración
+
+    print("DEBUG - entries:", files)
 
     urls = []
     for f in files:
@@ -82,6 +87,7 @@ def list_files(folder_path="/loader"):
             print(f"No se pudo crear link para {f['name']}: {e}")
             continue
     return urls
+
 
 
 
@@ -160,6 +166,7 @@ if __name__ == "__main__":
     test_root()  # <-- ver qué carpetas ve Dropbox
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
