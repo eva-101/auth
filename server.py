@@ -3,22 +3,43 @@ import requests, os
 from datetime import datetime
 
 app = Flask(__name__)
+ACCESS_TOKEN = None
+ACCESS_TOKEN_TIME = None
 
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
 
 def get_access_token():
-    url = "https://api.dropbox.com/oauth2/token"
-    data = {
+    global ACCESS_TOKEN, ACCESS_TOKEN_TIME
+
+    if ACCESS_TOKEN and (datetime.now() - ACCESS_TOKEN_TIME).seconds < 14400:
+        return ACCESS_TOKEN
+
+    r = requests.post("https://api.dropbox.com/oauth2/token", data={
         "grant_type": "refresh_token",
         "refresh_token": REFRESH_TOKEN,
         "client_id": APP_KEY,
         "client_secret": APP_SECRET
-    }
-    r = requests.post(url, data=data)
+    })
     r.raise_for_status()
-    return r.json()["access_token"]
+
+    ACCESS_TOKEN = r.json()["access_token"]
+    ACCESS_TOKEN_TIME = datetime.now()
+    return ACCESS_TOKEN
+
+
+#def get_access_token():
+#    url = "https://api.dropbox.com/oauth2/token"
+ #   data = {
+ #       "grant_type": "refresh_token",
+ #       "refresh_token": REFRESH_TOKEN,
+#        "client_id": APP_KEY,
+#        "client_secret": APP_SECRET
+ #   }
+ #   r = requests.post(url, data=data)
+ #   r.raise_for_status()
+ #   return r.json()["access_token"]
 
 def download_license(username):
     token = get_access_token()
@@ -57,36 +78,83 @@ def upload_license(username, content):
  
 def list_files(folder_path="/loader"):
     token = get_access_token()
-    headers = {"Authorization": f"Bearer {token}"}
-    data = {"path": folder_path, "recursive": True}  # <-- ahora sí recursivo
-    r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
-    r.raise_for_status()
-    files = r.json().get("entries", [])
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
 
-    print("DEBUG - entries:", files)
+    # 1️⃣ Listar archivos
+    data = {
+        "path": folder_path,
+        "recursive": True,
+        "include_deleted": False
+    }
+
+    r = requests.post(
+        "https://api.dropboxapi.com/2/files/list_folder",
+        headers=headers,
+        json=data
+    )
+    r.raise_for_status()
+
+    entries = r.json().get("entries", [])
+    print("DEBUG - entries:", entries)
 
     urls = []
-    for f in files:
-        if f[".tag"] != "file":
+
+    for f in entries:
+        # 2️⃣ Solo archivos válidos
+        if f.get(".tag") != "file":
             continue
-        link_data = {"path": f['path_lower']}
+
+        if not f.get("is_downloadable", True):
+            continue
+
+        path = f.get("path_lower")
+        if not path:
+            continue
+
+        # 3️⃣ Crear o reutilizar shared link
         try:
             link_resp = requests.post(
                 "https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings",
-                headers=headers, json=link_data
+                headers=headers,
+                json={"path": path}
             )
+
             if link_resp.status_code == 409:
+                # Ya existe → buscarlo
                 link_resp = requests.post(
                     "https://api.dropboxapi.com/2/sharing/list_shared_links",
-                    headers=headers, json={"path": f['path_lower'], "direct_only": True}
+                    headers=headers,
+                    json={
+                        "path": path,
+                        "direct_only": True
+                    }
                 )
-            link_resp.raise_for_status()
-            url = link_resp.json()["url"].replace("?dl=0", "?dl=1")
+
+                links = link_resp.json().get("links", [])
+                if not links:
+                    print(f"No shared link for {path}")
+                    continue
+
+                url = links[0]["url"]
+            else:
+                link_resp.raise_for_status()
+                url = link_resp.json().get("url")
+
+            if not url:
+                continue
+
+            # 4️⃣ Forzar descarga directa
+            url = url.replace("?dl=0", "?dl=1")
             urls.append(url)
+
         except Exception as e:
-            print(f"No se pudo crear link para {f['name']}: {e}")
-            continue
+            print(f"No se pudo generar link para {f.get('name')}: {e}")
+
     return urls
+
 
 
 
@@ -166,6 +234,7 @@ if __name__ == "__main__":
     test_root()  # <-- ver qué carpetas ve Dropbox
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
