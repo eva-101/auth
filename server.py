@@ -52,6 +52,7 @@ def list_files(folder_path="/loader"):
     urls = []
     for f in files:
         if f[".tag"] == "file":
+            url = f"https://www.dropbox.com/home{f['path_lower']}"  # fallback
             link_data = {"path": f['path_lower']}
             try:
                 link_resp = requests.post(
@@ -64,12 +65,10 @@ def list_files(folder_path="/loader"):
                         headers=headers, json={"path": f['path_lower'], "direct_only": True}
                     )
                 link_resp.raise_for_status()
-                url = link_resp.json()["url"]
-                url = url.replace("?dl=0", "?dl=1")
-                urls.append(url)
+                url = link_resp.json().get("url", url).replace("?dl=0", "?dl=1")
             except Exception as e:
                 print(f"No se pudo crear link para {f['name']}: {e}")
-                continue
+            urls.append(url)
     return urls
 
 
@@ -144,6 +143,7 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
