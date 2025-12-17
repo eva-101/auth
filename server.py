@@ -83,7 +83,6 @@ def list_files(folder_path="/loader"):
         "Content-Type": "application/json"
     }
 
-    # 1️⃣ Listar archivos
     r = requests.post(
         "https://api.dropboxapi.com/2/files/list_folder",
         headers=headers,
@@ -98,18 +97,19 @@ def list_files(folder_path="/loader"):
     entries = r.json().get("entries", [])
     print("DEBUG - entries:", entries)
 
-    urls = []
+    files = []
 
     for f in entries:
         if f.get(".tag") != "file":
             continue
 
         path = f.get("path_lower")
-        if not path:
+        name = f.get("name")
+
+        if not path or not name:
             continue
 
         try:
-            # 2️⃣ Obtener link temporal (NO sharing)
             link_resp = requests.post(
                 "https://api.dropboxapi.com/2/files/get_temporary_link",
                 headers=headers,
@@ -119,12 +119,16 @@ def list_files(folder_path="/loader"):
 
             url = link_resp.json().get("link")
             if url:
-                urls.append(url)
+                files.append({
+                    "url": url,
+                    "name": name
+                })
 
         except Exception as e:
-            print(f"No se pudo generar temp link para {f.get('name')}: {e}")
+            print(f"No se pudo generar temp link para {name}: {e}")
 
-    return urls
+    return files
+
 
  
 @app.route("/validate", methods=["POST"])
@@ -200,4 +204,5 @@ if __name__ == "__main__":
     test_root()  # <-- ver qué carpetas ve Dropbox
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
