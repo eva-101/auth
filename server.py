@@ -29,6 +29,14 @@ def download_license(username):
     r = requests.post("https://content.dropboxapi.com/2/files/download", headers=headers)
     r.raise_for_status()
     return r.text
+    
+def test_root():
+    token = get_access_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    data = {"path": "", "recursive": False}  # raíz del token de la app
+    r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
+    r.raise_for_status()
+    print("DEBUG - root entries:", r.json().get("entries", []))
 
 def upload_license(username, content):
     token = get_access_token()
@@ -132,7 +140,8 @@ def validate():
     # OBTENER URLS DE ARCHIVOS DEL LOADER
     # -----------------------------
     try:
-        file_urls = list_files("/Aplicaciones/editrojson/loader")
+        file_urls = list_files("/editrojson/loader")  # ruta exacta que Dropbox muestra
+
     except Exception as e:
         file_urls = []
         print("Error al obtener archivos de Dropbox:", e)
@@ -147,8 +156,11 @@ def validate():
     return jsonify(response), 200
 
 if __name__ == "__main__":
+    test_root()  # <-- ver qué carpetas ve Dropbox
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
+
 
 
 
