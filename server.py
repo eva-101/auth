@@ -129,7 +129,7 @@ def validate():
     # OBTENER URLS DE ARCHIVOS DEL LOADER
     # -----------------------------
     try:
-        file_urls = list_files("/loader")
+        file_urls = list_files("/Aplicaciones/editrojson/loader")
     except Exception as e:
         file_urls = []
         print("Error al obtener archivos de Dropbox:", e)
@@ -146,6 +146,7 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
