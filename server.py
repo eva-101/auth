@@ -50,16 +50,16 @@ def upload_license(username, content):
     return True
 
  
-def list_files(folder_path="/Apps/editrojson/loader"):
+def list_files(folder_path="/loader"):
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
-    data = {"path": folder_path, "recursive": False}
+    data = {"path": folder_path, "recursive": False}  # solo esa carpeta
     r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
     r.raise_for_status()
     files = r.json().get("entries", [])
     
-    print("DEBUG - entries:", files)  # <--- VERIFICAR qué devuelve Dropbox
-    
+    print("DEBUG - entries:", files)  # para depuración
+
     urls = []
     for f in files:
         if f[".tag"] != "file":
@@ -82,6 +82,7 @@ def list_files(folder_path="/Apps/editrojson/loader"):
             print(f"No se pudo crear link para {f['name']}: {e}")
             continue
     return urls
+
 
 
 
@@ -140,7 +141,7 @@ def validate():
     # OBTENER URLS DE ARCHIVOS DEL LOADER
     # -----------------------------
     try:
-        file_urls = list_files("/editrojson/loader")  # ruta exacta que Dropbox muestra
+        file_urls = list_files("/loader")
 
     except Exception as e:
         file_urls = []
@@ -159,6 +160,7 @@ if __name__ == "__main__":
     test_root()  # <-- ver qué carpetas ve Dropbox
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
