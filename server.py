@@ -42,14 +42,16 @@ def upload_license(username, content):
     return True
 
  
-def list_files(folder_path="/Aplicaciones/editrojson/loader"):
+def list_files(folder_path="/Apps/editrojson/loader"):
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
-    data = {"path": folder_path, "recursive": False}  # false si solo quieres esa carpeta
+    data = {"path": folder_path, "recursive": False}
     r = requests.post("https://api.dropboxapi.com/2/files/list_folder", headers=headers, json=data)
     r.raise_for_status()
     files = r.json().get("entries", [])
-
+    
+    print("DEBUG - entries:", files)  # <--- VERIFICAR qué devuelve Dropbox
+    
     urls = []
     for f in files:
         if f[".tag"] != "file":
@@ -147,6 +149,7 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000)) 
     app.run(host="0.0.0.0", port=port)
+
 
 
 
