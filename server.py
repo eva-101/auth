@@ -27,9 +27,6 @@ def get_uptime():
     s = s % 60
     return f"{h}h {m}m {s}s"
 
-def server_ping_ms(start):
-    return int((time.time() - start) * 1000)
-
 # =========================
 # DROPBOX AUTH
 # =========================
@@ -65,6 +62,7 @@ def download_license(username):
         "Authorization": f"Bearer {token}",
         "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt"}}'
     }
+    
     r = requests.post(
         "https://content.dropboxapi.com/2/files/download",
         headers=headers
@@ -153,20 +151,19 @@ def validate():
     data = request.json or {}
 
     # =========================
-    # KEEP ALIVE / STATUS
+    # KEEP ALIVE
     # =========================
-    if data.get("username") in ("PING_KEEPALIVE", "1170891260383477901") and data.get("password", "") == "":
-        start = time.time()
-
+    if data.get("username") == "PING_KEEPALIVE":
         return jsonify({
             "error": False,
             "status": "SERVER_ALIVE",
             "server_time": datetime.now().isoformat(),
             "uptime": get_uptime(),
-            "ping_ms": server_ping_ms(start),
             "licenses_total": count_licenses(),
             "loader_files": count_loader_files()
         }), 200
+
+    return jsonify({"error": True, "status": "Invalid request"}), 400
 
     # =========================
     # LOGIN NORMAL
@@ -253,4 +250,5 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
