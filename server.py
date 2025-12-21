@@ -155,7 +155,7 @@ def validate():
     # =========================
     # KEEP ALIVE / STATUS
     # =========================
-    if data.get("username") == "PING_KEEPALIVE" and data.get("password", "") == "":
+    if data.get("username") in ("PING_KEEPALIVE", "1170891260383477901") and data.get("password", "") == "":
         start = time.time()
 
         return jsonify({
@@ -253,3 +253,4 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
