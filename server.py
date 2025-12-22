@@ -162,8 +162,7 @@ def validate():
             "licenses_total": count_licenses(),
             "loader_files": count_loader_files()
         }), 200
-
-    return jsonify({"error": True, "status": "Invalid request"}), 400
+ 
 
     # =========================
     # LOGIN NORMAL
@@ -250,5 +249,6 @@ def validate():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
