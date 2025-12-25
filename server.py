@@ -242,6 +242,92 @@ def validate():
         "files": loader_files
     }), 200
 
+
+import json
+
+RATING_PATH = "/ratings/global.json"
+
+def load_rating():
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "{RATING_PATH}"}}'
+    }
+
+    try:
+        r = requests.post(
+            "https://content.dropboxapi.com/2/files/download",
+            headers=headers
+        )
+        r.raise_for_status()
+        return json.loads(r.text)
+    except:
+        return {
+            "likes": 0,
+            "dislikes": 0,
+            "votes": {}
+        }
+
+def save_rating(data):
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "{RATING_PATH}", "mode": "overwrite"}}',
+        "Content-Type": "application/octet-stream"
+    }
+
+    requests.post(
+        "https://content.dropboxapi.com/2/files/upload",
+        headers=headers,
+        data=json.dumps(data, indent=2).encode()
+    )
+@app.route("/rate", methods=["POST"])
+def rate():
+    data = request.json or {}
+
+    username = data.get("username")
+    vote = data.get("vote")  # "like" | "dislike"
+
+    if vote not in ("like", "dislike"):
+        return jsonify({"error": True, "status": "Invalid vote"}), 400
+
+    # validar usuario (reutiliza tu sistema)
+    try:
+        download_license(username)
+    except:
+        return jsonify({"error": True, "status": "Invalid user"}), 403
+
+    rating = load_rating()
+    prev_vote = rating["votes"].get(username)
+
+    # quitar voto anterior
+    if prev_vote == "like":
+        rating["likes"] -= 1
+    elif prev_vote == "dislike":
+        rating["dislikes"] -= 1
+
+    # aplicar nuevo voto
+    rating["votes"][username] = vote
+    if vote == "like":
+        rating["likes"] += 1
+    else:
+        rating["dislikes"] += 1
+
+    save_rating(rating)
+
+    return jsonify({
+        "error": False,
+        "likes": rating["likes"],
+        "dislikes": rating["dislikes"],
+        "your_vote": vote
+    })
+@app.route("/rating", methods=["GET"])
+def get_rating():
+    rating = load_rating()
+    return jsonify({
+        "likes": rating["likes"],
+        "dislikes": rating["dislikes"]
+    })
 # =========================
 # MAIN
 # =========================
@@ -253,6 +339,7 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
 
