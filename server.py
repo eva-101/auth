@@ -1,12 +1,11 @@
 from flask import Flask, request, jsonify
-import requests, os, time
+import requests
+import os
+import time
+import json
 from datetime import datetime
 
 app = Flask(__name__)
-
-# =========================
-# VARIABLES GLOBALES
-# =========================
 
 ACCESS_TOKEN = None
 ACCESS_TOKEN_TIME = None
@@ -16,20 +15,16 @@ REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
 
-# =========================
-# HELPERS SISTEMA
-# =========================
+RATING_PATH = "/ratings/global.json"
+
 
 def get_uptime():
     s = int(time.time() - SERVER_START_TIME)
     h = s // 3600
     m = (s % 3600) // 60
-    s = s % 60
+    s %= 60
     return f"{h}h {m}m {s}s"
 
-# =========================
-# DROPBOX AUTH
-# =========================
 
 def get_access_token():
     global ACCESS_TOKEN, ACCESS_TOKEN_TIME
@@ -52,9 +47,6 @@ def get_access_token():
     ACCESS_TOKEN_TIME = datetime.now()
     return ACCESS_TOKEN
 
-# =========================
-# DROPBOX FUNCIONES
-# =========================
 
 def download_license(username):
     token = get_access_token()
@@ -62,13 +54,14 @@ def download_license(username):
         "Authorization": f"Bearer {token}",
         "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt"}}'
     }
-    
+
     r = requests.post(
         "https://content.dropboxapi.com/2/files/download",
         headers=headers
     )
     r.raise_for_status()
     return r.text
+
 
 def upload_license(username, content):
     token = get_access_token()
@@ -77,6 +70,7 @@ def upload_license(username, content):
         "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt", "mode": "overwrite"}}',
         "Content-Type": "application/octet-stream"
     }
+
     r = requests.post(
         "https://content.dropboxapi.com/2/files/upload",
         headers=headers,
@@ -84,6 +78,7 @@ def upload_license(username, content):
     )
     r.raise_for_status()
     return True
+
 
 def list_files(folder_path):
     token = get_access_token()
@@ -103,25 +98,21 @@ def list_files(folder_path):
     )
     r.raise_for_status()
 
-    entries = r.json().get("entries", [])
     files = []
 
-    for f in entries:
+    for f in r.json().get("entries", []):
         if f.get(".tag") != "file":
             continue
-
-        path = f.get("path_lower")
-        name = f.get("name")
 
         try:
             link_resp = requests.post(
                 "https://api.dropboxapi.com/2/files/get_temporary_link",
                 headers=headers,
-                json={"path": path}
+                json={"path": f.get("path_lower")}
             )
             link_resp.raise_for_status()
             files.append({
-                "name": name,
+                "name": f.get("name"),
                 "url": link_resp.json().get("link")
             })
         except:
@@ -129,11 +120,13 @@ def list_files(folder_path):
 
     return files
 
+
 def count_licenses():
     try:
         return len(list_files("/licenses"))
     except:
         return 0
+
 
 def count_loader_files():
     try:
@@ -141,18 +134,44 @@ def count_loader_files():
     except:
         return 0
 
-# =========================
-# ENDPOINT PRINCIPAL
-# =========================
+
+def load_rating():
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "{RATING_PATH}"}}'
+    }
+
+    try:
+        r = requests.post(
+            "https://content.dropboxapi.com/2/files/download",
+            headers=headers
+        )
+        r.raise_for_status()
+        return json.loads(r.text)
+    except:
+        return {"likes": 0, "dislikes": 0, "votes": {}}
+
+
+def save_rating(data):
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "{RATING_PATH}", "mode": "overwrite"}}',
+        "Content-Type": "application/octet-stream"
+    }
+
+    requests.post(
+        "https://content.dropboxapi.com/2/files/upload",
+        headers=headers,
+        data=json.dumps(data, indent=2).encode()
+    )
+
 
 @app.route("/validate", methods=["POST"])
 def validate():
-
     data = request.json or {}
 
-    # =========================
-    # KEEP ALIVE
-    # =========================
     if data.get("username") == "PING_KEEPALIVE":
         return jsonify({
             "error": False,
@@ -162,11 +181,6 @@ def validate():
             "licenses_total": count_licenses(),
             "loader_files": count_loader_files()
         }), 200
- 
-
-    # =========================
-    # LOGIN NORMAL
-    # =========================
 
     username = data.get("username")
     password = data.get("password", "")
@@ -194,6 +208,7 @@ def validate():
     expire_date = datetime.fromisoformat(
         lic.get("expires", "2100-01-01T00:00:00")
     )
+
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "License expired"}), 403
 
@@ -201,7 +216,8 @@ def validate():
 
     if not is_global:
         updated = False
-        for key, value in [
+
+        for k, v in [
             ("hwid", hwid),
             ("cpu_id", cpu_id),
             ("ram", ram),
@@ -209,26 +225,16 @@ def validate():
             ("disk", disk),
             ("ip", ip)
         ]:
-            if value and not lic.get(key):
-                lic[key] = value
+            if v and not lic.get(k):
+                lic[k] = v
                 updated = True
 
         if updated:
-            upload_license(
-                username,
-                "\n".join(f"{k}={v}" for k, v in lic.items())
-            )
+            upload_license(username, "\n".join(f"{k}={v}" for k, v in lic.items()))
 
-        for key, value in [
-            ("hwid", hwid),
-            ("cpu_id", cpu_id),
-            ("mac", mac)
-        ]:
-            if value and lic.get(key) and value != lic.get(key):
-                return jsonify({
-                    "error": True,
-                    "status": f"{key.upper()} mismatch"
-                }), 403
+        for k, v in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
+            if v and lic.get(k) and v != lic.get(k):
+                return jsonify({"error": True, "status": f"{k.upper()} mismatch"}), 403
 
     try:
         loader_files = list_files("/loader")
@@ -243,55 +249,16 @@ def validate():
     }), 200
 
 
-import json
-
-RATING_PATH = "/ratings/global.json"
-
-def load_rating():
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": f'{{"path": "{RATING_PATH}"}}'
-    }
-
-    try:
-        r = requests.post(
-            "https://content.dropboxapi.com/2/files/download",
-            headers=headers
-        )
-        r.raise_for_status()
-        return json.loads(r.text)
-    except:
-        return {
-            "likes": 0,
-            "dislikes": 0,
-            "votes": {}
-        }
-
-def save_rating(data):
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": f'{{"path": "{RATING_PATH}", "mode": "overwrite"}}',
-        "Content-Type": "application/octet-stream"
-    }
-
-    requests.post(
-        "https://content.dropboxapi.com/2/files/upload",
-        headers=headers,
-        data=json.dumps(data, indent=2).encode()
-    )
 @app.route("/rate", methods=["POST"])
 def rate():
     data = request.json or {}
 
     username = data.get("username")
-    vote = data.get("vote")  # "like" | "dislike"
+    vote = data.get("vote")
 
     if vote not in ("like", "dislike"):
         return jsonify({"error": True, "status": "Invalid vote"}), 400
 
-    # validar usuario (reutiliza tu sistema)
     try:
         download_license(username)
     except:
@@ -300,14 +267,13 @@ def rate():
     rating = load_rating()
     prev_vote = rating["votes"].get(username)
 
-    # quitar voto anterior
     if prev_vote == "like":
         rating["likes"] -= 1
     elif prev_vote == "dislike":
         rating["dislikes"] -= 1
 
-    # aplicar nuevo voto
     rating["votes"][username] = vote
+
     if vote == "like":
         rating["likes"] += 1
     else:
@@ -321,6 +287,8 @@ def rate():
         "dislikes": rating["dislikes"],
         "your_vote": vote
     })
+
+
 @app.route("/rating", methods=["GET"])
 def get_rating():
     rating = load_rating()
@@ -328,19 +296,10 @@ def get_rating():
         "likes": rating["likes"],
         "dislikes": rating["dislikes"]
     })
-# =========================
-# MAIN
-# =========================
 
 
 if __name__ == "__main__":
     import logging
-    logging.getLogger('werkzeug').setLevel(logging.ERROR)
-
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-
-
-
-
