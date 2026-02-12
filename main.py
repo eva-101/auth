@@ -4,6 +4,7 @@ import os
 import time
 import json
 from datetime import datetime
+import ast
 
 app = Flask(__name__)
 
@@ -203,19 +204,19 @@ def validate():
     lines = content.splitlines()
     lic = {}
     roles_dict = {}
-    roles_started = False
 
     for line in lines:
         line = line.strip()
         if not line:
             continue
 
-        if roles_started:
-            if "=" in line:
-                role_name, color = line.split("=", 1)
-                roles_dict[role_name.strip()] = color.strip()
-        elif line.lower() == "roles:":
-            roles_started = True
+        # Si la línea empieza con "roles=" parseamos el dict
+        if line.lower().startswith("roles="):
+            try:
+                roles_dict = ast.literal_eval(line.split("=", 1)[1])
+            except Exception:
+                roles_dict = {}
+        # Para las otras líneas key=value
         elif "=" in line:
             key, value = line.split("=", 1)
             lic[key.strip()] = value.strip()
@@ -327,4 +328,5 @@ if __name__ == "__main__":
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
