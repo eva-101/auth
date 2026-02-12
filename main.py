@@ -172,6 +172,7 @@ def save_rating(data):
 def validate():
     data = request.json or {}
 
+    # --- KEEPALIVE CHECK ---
     if data.get("username") == "PING_KEEPALIVE":
         return jsonify({
             "error": False,
@@ -182,6 +183,7 @@ def validate():
             "loader_files": count_loader_files()
         }), 200
 
+    # --- DATOS DEL CLIENTE ---
     username = data.get("username")
     password = data.get("password", "")
     hwid = data.get("hwid", "")
@@ -191,27 +193,47 @@ def validate():
     disk = data.get("disk", "")
     ip = data.get("ip", "")
 
+    # --- DESCARGAR LICENCIA ---
     try:
         content = download_license(username)
     except:
         return jsonify({"error": True, "status": "User not found"}), 404
 
-    lic = dict(
-        line.split("=", 1)
-        for line in content.split("\n")
-        if "=" in line
-    )
+    # --- PARSE LICENSE CON ROLES ---
+    lines = content.splitlines()
+    lic = {}
+    roles_dict = {}
+    roles_started = False
 
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        if roles_started:
+            if "=" in line:
+                role_name, color = line.split("=", 1)
+                roles_dict[role_name.strip()] = color.strip()
+        elif line.lower() == "roles:":
+            roles_started = True
+        elif "=" in line:
+            key, value = line.split("=", 1)
+            lic[key.strip()] = value.strip()
+
+    lic["roles"] = roles_dict
+
+    # --- VALIDAR CONTRASEÑA ---
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Incorrect password"}), 403
 
+    # --- VALIDAR EXPIRACIÓN ---
     expire_date = datetime.fromisoformat(
         lic.get("expires", "2100-01-01T00:00:00")
     )
-
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "License expired"}), 403
 
+    # --- VALIDAR HWID / GLOBAL ---
     is_global = lic.get("global", "false").lower() == "true"
 
     if not is_global:
@@ -236,11 +258,13 @@ def validate():
             if v and lic.get(k) and v != lic.get(k):
                 return jsonify({"error": True, "status": f"{k.upper()} mismatch"}), 403
 
+    # --- LISTAR ARCHIVOS DEL LOADER ---
     try:
         loader_files = list_files("/loader")
     except:
         loader_files = []
 
+    # --- RESPUESTA EXITOSA ---
     return jsonify({
         "error": False,
         "status": "Login successful",
@@ -303,3 +327,4 @@ if __name__ == "__main__":
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
