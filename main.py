@@ -7,6 +7,8 @@ import ast
 
 app = Flask(__name__)
 
+# ================== ESTADO GLOBAL ==================
+
 ACCESS_TOKEN = None
 ACCESS_TOKEN_TIME = None
 SERVER_START_TIME = time.time()
@@ -15,6 +17,8 @@ REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
 
+
+# ================== UTILIDADES ==================
 
 def get_uptime():
     s = int(time.time() - SERVER_START_TIME)
@@ -27,6 +31,7 @@ def get_uptime():
 def get_access_token():
     global ACCESS_TOKEN, ACCESS_TOKEN_TIME
 
+    # Reusar token si no pasaron 4 horas
     if ACCESS_TOKEN and (datetime.now() - ACCESS_TOKEN_TIME).seconds < 14400:
         return ACCESS_TOKEN
 
@@ -46,7 +51,7 @@ def get_access_token():
     return ACCESS_TOKEN
 
 
-def download_license(username):
+def download_license(username: str) -> str:
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -61,7 +66,7 @@ def download_license(username):
     return r.text
 
 
-def upload_license(username, content):
+def upload_license(username: str, content: str) -> bool:
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -78,7 +83,10 @@ def upload_license(username, content):
     return True
 
 
-def list_files(folder_path):
+def list_files(folder_path: str):
+    """
+    Lista archivos de una carpeta de Dropbox y genera enlaces temporales.
+    """
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -116,29 +124,54 @@ def list_files(folder_path):
                 }
             )
         except Exception:
+            # Si falla un archivo, sigue con el resto
             pass
 
     return files
 
 
-def count_licenses():
+def count_licenses() -> int:
     try:
         return len(list_files("/licenses"))
     except Exception:
         return 0
 
 
-def count_loader_files():
+def count_loader_files() -> int:
     try:
         return len(list_files("/loader"))
     except Exception:
         return 0
 
 
+# ================== RUTAS ==================
+
+@app.route("/games", methods=["GET"])
+def games():
+    """
+    Devuelve la lista de archivos (ej: .zip) desde /elementos en Dropbox,
+    con nombre y URL temporal.
+    """
+    try:
+        files = list_files("/elementos")  # carpeta donde tienes los .zip
+    except Exception as e:
+        return jsonify({"error": True, "status": str(e), "files": []}), 500
+
+    # Opcional: filtrar solo ZIP
+    zip_files = [f for f in files if f["name"].lower().endswith(".zip")]
+
+    return jsonify({
+        "error": False,
+        "status": "OK",
+        "files": zip_files
+    }), 200
+
+
 @app.route("/validate", methods=["POST"])
 def validate():
     data = request.json or {}
 
+    # Ping de keep-alive
     if data.get("username") == "PING_KEEPALIVE":
         return (
             jsonify(
@@ -163,6 +196,7 @@ def validate():
     disk = data.get("disk", "")
     ip = data.get("ip", "")
 
+    # Cargar licencia desde Dropbox
     try:
         content = download_license(username)
     except Exception:
@@ -172,6 +206,7 @@ def validate():
     lic = {}
     roles_dict = {}
 
+    # Parsear archivo de licencia
     for line in lines:
         line = line.strip()
         if not line:
@@ -188,9 +223,11 @@ def validate():
 
     lic["roles"] = roles_dict
 
+    # Validar password si existe
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Incorrect password"}), 403
 
+    # Validar expiry
     expire_date = datetime.fromisoformat(
         lic.get("expires", "2100-01-01T00:00:00")
     )
@@ -199,6 +236,7 @@ def validate():
 
     is_global = lic.get("global", "false").lower() == "true"
 
+    # Si no es global, bindear HWID / datos si faltan y luego validar
     if not is_global:
         updated = False
 
@@ -215,7 +253,7 @@ def validate():
                 updated = True
 
         if updated:
-            upload_license(username, "\n".join(f"{k}={v}" for k, v in lic.items()))
+            upload_license(username, "\\n".join(f"{k}={v}" for k, v in lic.items()))
 
         for k, v in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
             if v and lic.get(k) and v != lic.get(k):
@@ -224,10 +262,17 @@ def validate():
                     403,
                 )
 
+    # Archivos del loader
     try:
         loader_files = list_files("/loader")
     except Exception:
         loader_files = []
+
+    # Archivos de juegos (/elementos)
+    try:
+        game_files = list_files("/elementos")
+    except Exception:
+        game_files = []
 
     return (
         jsonify(
@@ -236,11 +281,14 @@ def validate():
                 "status": "Login successful",
                 "license": lic,
                 "files": loader_files,
+                "games": game_files,
             }
         ),
         200,
     )
 
+
+# ================== MAIN ==================
 
 if __name__ == "__main__":
     import logging
