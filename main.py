@@ -253,7 +253,7 @@ def validate():
                 updated = True
 
         if updated:
-            upload_license(username, "\\n".join(f"{k}={v}" for k, v in lic.items()))
+            upload_license(username, "\n".join(f"{k}={v}" for k, v in lic.items()))
 
         for k, v in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
             if v and lic.get(k) and v != lic.get(k):
@@ -296,3 +296,4 @@ if __name__ == "__main__":
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
