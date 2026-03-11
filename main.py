@@ -38,7 +38,7 @@ MY_GUILD_ID = int(os.environ["MY_GUILD_ID"])
 LICENSE_LISTS: dict[int, list[str]] = {}
 MY_GUILD = discord.Object(id=MY_GUILD_ID)
 
-PRIMARY_KEEP_ALIVE_URL = "https://auth-clco.onrender.com/validate"
+PRIMARY_KEEP_ALIVE_URL = os.environ["PRIMARY_KEEP_ALIVE_URL"]
 PRIMARY_KEEP_ALIVE_KEY = "PING_KEEPALIVE"
 
 
@@ -53,8 +53,6 @@ APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
 
 SELF_BASE_URL = os.environ.get("SELF_BASE_URL", "https://auth-clco.onrender.com")
-KEEPALIVE_INTERVAL = int(os.environ.get("KEEPALIVE_INTERVAL", 60))
-KEEPALIVE_RUNNING = True
 
 
 def get_uptime():
@@ -93,7 +91,6 @@ def download_license(username: str) -> str:
         "Authorization": f"Bearer {token}",
         "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt"}}',
     }
-
     r = requests.post(
         "https://content.dropboxapi.com/2/files/download",
         headers=headers,
@@ -109,7 +106,6 @@ def upload_license(username: str, content: str) -> bool:
         "Dropbox-API-Arg": f'{{"path": "/licenses/{username}.txt", "mode": "overwrite"}}',
         "Content-Type": "application/octet-stream",
     }
-
     r = requests.post(
         "https://content.dropboxapi.com/2/files/upload",
         headers=headers,
@@ -125,7 +121,6 @@ def list_files(folder_path: str):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-
     r = requests.post(
         "https://api.dropboxapi.com/2/files/list_folder",
         headers=headers,
@@ -138,11 +133,9 @@ def list_files(folder_path: str):
     r.raise_for_status()
 
     files = []
-
     for f in r.json().get("entries", []):
         if f.get(".tag") != "file":
             continue
-
         try:
             link_resp = requests.post(
                 "https://api.dropboxapi.com/2/files/get_temporary_link",
@@ -174,34 +167,6 @@ def count_loader_files() -> int:
         return len(list_files("/loader"))
     except Exception:
         return 0
-
-
-def keepalive_bot():
-    global KEEPALIVE_RUNNING
-    url = f"{SELF_BASE_URL}/validate"
-
-    while KEEPALIVE_RUNNING:
-        try:
-            payload = {
-                "username": "PING_KEEPALIVE",
-                "password": "",
-            }
-            headers = {"Content-Type": "application/json"}
-            resp = requests.post(
-                url,
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=10,
-            )
-            print(f"[KEEPALIVE] status={resp.status_code} resp={resp.text[:200]}")
-        except Exception as e:
-            print(f"[KEEPALIVE] error: {e}")
-        time.sleep(KEEPALIVE_INTERVAL)
-
-
-def start_keepalive_thread():
-    t = threading.Thread(target=keepalive_bot, daemon=True)
-    t.start()
 
 
 @app.route("/games", methods=["GET"])
@@ -261,7 +226,6 @@ def validate():
         line = line.strip()
         if not line:
             continue
-
         if line.lower().startswith("roles="):
             try:
                 roles_dict = ast.literal_eval(line.split("=", 1)[1])
@@ -286,7 +250,6 @@ def validate():
 
     if not is_global:
         updated = False
-
         for k, v in [
             ("hwid", hwid),
             ("cpu_id", cpu_id),
@@ -298,10 +261,8 @@ def validate():
             if v and not lic.get(k):
                 lic[k] = v
                 updated = True
-
         if updated:
             upload_license(username, "\n".join(f"{k}={v}" for k, v in lic.items()))
-
         for k, v in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
             if v and lic.get(k) and v != lic.get(k):
                 return (
@@ -334,34 +295,12 @@ def validate():
 
 
 def upload_file(path: str, content: str) -> bool:
-    token = get_access_token()
-    url = "https://content.dropboxapi.com/2/files/upload"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": json.dumps(
-            {
-                "path": path,
-                "mode": "overwrite",
-                "mute": True,
-            }
-        ),
-        "Content-Type": "application/octet-stream",
-    }
-    r = requests.post(url, headers=headers, data=content.encode("utf-8"))
-    r.raise_for_status()
-    return True
+    return upload_license(path.replace("/licenses/", "").replace(".txt", ""), content)
 
 
 def download_file(path: str) -> str:
-    token = get_access_token()
-    url = "https://content.dropboxapi.com/2/files/download"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": json.dumps({"path": path}),
-    }
-    r = requests.post(url, headers=headers)
-    r.raise_for_status()
-    return r.text
+    username = os.path.basename(path).replace(".txt", "")
+    return download_license(username)
 
 
 def delete_file(path: str) -> bool:
@@ -1007,7 +946,6 @@ async def on_member_join(member: discord.Member):
 def run_flask():
     import logging
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
-    start_keepalive_thread()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
