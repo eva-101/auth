@@ -172,6 +172,114 @@ def start_keepalive_thread():
     t.start()
 
 
+# ================== NUEVO: CREAR CUENTA ==================
+
+def download_account(username: str) -> str:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "/accounts/{username}.txt"}}',
+    }
+    r = requests.post(
+        "https://content.dropboxapi.com/2/files/download",
+        headers=headers,
+    )
+    r.raise_for_status()
+    return r.text
+
+
+def upload_account(username: str, content: str) -> bool:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "/accounts/{username}.txt", "mode": "overwrite"}}',
+        "Content-Type": "application/octet-stream",
+    }
+    r = requests.post(
+        "https://content.dropboxapi.com/2/files/upload",
+        headers=headers,
+        data=content.encode(),
+    )
+    r.raise_for_status()
+    return True
+
+
+
+@app.route("/create_account", methods=["POST"])
+def create_account():
+    data = request.json or {}
+
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    avatar_url = (data.get("avatar_url") or "").strip()
+
+    if not username or not password:
+        return jsonify({"error": True, "status": "Username and password required"}), 400
+
+    # Validaciones básicas sencillas
+    if len(username) < 3:
+        return jsonify({"error": True, "status": "Username too short"}), 400
+    if len(password) < 4:
+        return jsonify({"error": True, "status": "Password too short"}), 400
+
+    # Verificar si ya existe
+    try:
+        _ = download_account(username)
+        return jsonify({"error": True, "status": "Username already exists"}), 409
+    except Exception:
+        # Si falla, asumimos que no existe y seguimos
+        pass
+
+    account_data = {
+        "username": username,
+        "password": password,  # si quieres, aquí puedes hashear
+        "avatar_url": avatar_url,
+        "created_at": datetime.now().isoformat(),
+    }
+
+    content = "\n".join(f"{k}={v}" for k, v in account_data.items())
+    try:
+        upload_account(username, content)
+    except Exception as e:
+        return jsonify({"error": True, "status": f"Error saving account: {e}"}), 500
+
+    return jsonify({"error": False, "status": "Account created", "account": account_data}), 201
+
+
+@app.route("/login_account", methods=["POST"])
+def login_account():
+    data = request.json or {}
+
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+
+    if not username or not password:
+        return jsonify({"error": True, "status": "Username and password required"}), 400
+
+    try:
+        content = download_account(username)
+    except Exception:
+        return jsonify({"error": True, "status": "Account not found"}), 404
+
+    acc = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        acc[k.strip()] = v.strip()
+
+    if acc.get("password") != password:
+        return jsonify({"error": True, "status": "Incorrect password"}), 403
+
+    # Podés reusar parte de la lógica de validate(), por ahora devuelvo datos simples
+    return jsonify({
+        "error": False,
+        "status": "Login successful",
+        "account": acc
+    }), 200
+
+
 # ================== RUTAS ==================
 
 @app.route("/games", methods=["GET"])
@@ -314,5 +422,6 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
 
