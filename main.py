@@ -18,9 +18,9 @@ SERVER_START_TIME = time.time()
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
+ 
+SELF_BASE_URL = os.environ.get("SELF_BASE_URL", "https://auth-clco.onrender.com")
 
-# URL pública de tu propia API (para que el bot llame a /validate)
-SELF_BASE_URL = os.environ.get("SELF_BASE_URL", "https://auth-clco.onrender.com/validate")
 KEEPALIVE_INTERVAL = int(os.environ.get("KEEPALIVE_INTERVAL", 60))  # en segundos
 KEEPALIVE_RUNNING = True
 
@@ -314,4 +314,5 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
