@@ -4,6 +4,8 @@ import os
 import time
 from datetime import datetime
 import ast
+import threading
+import json
 
 app = Flask(__name__)
 
@@ -16,6 +18,11 @@ SERVER_START_TIME = time.time()
 REFRESH_TOKEN = os.environ["REFRESH_TOKEN"]
 APP_KEY = os.environ["APP_KEY"]
 APP_SECRET = os.environ["APP_SECRET"]
+
+# URL pública de tu propia API (para que el bot llame a /validate)
+SELF_BASE_URL = os.environ.get("SELF_BASE_URL", "https://auth-clco.onrender.com")
+KEEPALIVE_INTERVAL = int(os.environ.get("KEEPALIVE_INTERVAL", 60))  # en segundos
+KEEPALIVE_RUNNING = True
 
 
 # ================== UTILIDADES ==================
@@ -31,7 +38,6 @@ def get_uptime():
 def get_access_token():
     global ACCESS_TOKEN, ACCESS_TOKEN_TIME
 
-    # Reusar token si no pasaron 4 horas
     if ACCESS_TOKEN and (datetime.now() - ACCESS_TOKEN_TIME).seconds < 14400:
         return ACCESS_TOKEN
 
@@ -84,9 +90,6 @@ def upload_license(username: str, content: str) -> bool:
 
 
 def list_files(folder_path: str):
-    """
-    Lista archivos de una carpeta de Dropbox y genera enlaces temporales.
-    """
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -124,7 +127,6 @@ def list_files(folder_path: str):
                 }
             )
         except Exception:
-            # Si falla un archivo, sigue con el resto
             pass
 
     return files
@@ -144,20 +146,41 @@ def count_loader_files() -> int:
         return 0
 
 
+# ================== MINI BOT KEEPALIVE ==================
+
+def keepalive_bot():
+    global KEEPALIVE_RUNNING
+    url = f"{SELF_BASE_URL}/validate"
+
+    while KEEPALIVE_RUNNING:
+        try:
+            payload = {
+                "username": "PING_KEEPALIVE",
+                "password": "",
+            }
+            headers = {"Content-Type": "application/json"}
+            resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+            # Opcional: log básico
+            print(f"[KEEPALIVE] status={resp.status_code} resp={resp.text[:200]}")
+        except Exception as e:
+            print(f"[KEEPALIVE] error: {e}")
+        time.sleep(KEEPALIVE_INTERVAL)
+
+
+def start_keepalive_thread():
+    t = threading.Thread(target=keepalive_bot, daemon=True)
+    t.start()
+
+
 # ================== RUTAS ==================
 
 @app.route("/games", methods=["GET"])
 def games():
-    """
-    Devuelve la lista de archivos (ej: .zip) desde /elementos en Dropbox,
-    con nombre y URL temporal.
-    """
     try:
-        files = list_files("/elementos")  # carpeta donde tienes los .zip
+        files = list_files("/elementos")
     except Exception as e:
         return jsonify({"error": True, "status": str(e), "files": []}), 500
 
-    # Opcional: filtrar solo ZIP
     zip_files = [f for f in files if f["name"].lower().endswith(".zip")]
 
     return jsonify({
@@ -171,7 +194,6 @@ def games():
 def validate():
     data = request.json or {}
 
-    # Ping de keep-alive
     if data.get("username") == "PING_KEEPALIVE":
         return (
             jsonify(
@@ -196,7 +218,6 @@ def validate():
     disk = data.get("disk", "")
     ip = data.get("ip", "")
 
-    # Cargar licencia desde Dropbox
     try:
         content = download_license(username)
     except Exception:
@@ -206,7 +227,6 @@ def validate():
     lic = {}
     roles_dict = {}
 
-    # Parsear archivo de licencia
     for line in lines:
         line = line.strip()
         if not line:
@@ -223,11 +243,9 @@ def validate():
 
     lic["roles"] = roles_dict
 
-    # Validar password si existe
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Incorrect password"}), 403
 
-    # Validar expiry
     expire_date = datetime.fromisoformat(
         lic.get("expires", "2100-01-01T00:00:00")
     )
@@ -236,7 +254,6 @@ def validate():
 
     is_global = lic.get("global", "false").lower() == "true"
 
-    # Si no es global, bindear HWID / datos si faltan y luego validar
     if not is_global:
         updated = False
 
@@ -262,13 +279,11 @@ def validate():
                     403,
                 )
 
-    # Archivos del loader
     try:
         loader_files = list_files("/loader")
     except Exception:
         loader_files = []
 
-    # Archivos de juegos (/elementos)
     try:
         game_files = list_files("/elementos")
     except Exception:
@@ -294,6 +309,10 @@ if __name__ == "__main__":
     import logging
 
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+    start_keepalive_thread()
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
