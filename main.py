@@ -285,14 +285,6 @@ def create_account():
     return jsonify({"error": False, "status": "Account created", "account": account_data}), 201
 
 
-Sí, te entiendo perfectamente: querés que el endpoint de login de cuenta (/login_account) también devuelva en el JSON la info de juegos y/o loader igual que hace /validate y /games.
-
-Te dejo dos opciones claras.
-
-Opción 1: Solo agregar games al login
-Si querés que el login de cuenta devuelva la lista de juegos (los .zip de /elementos), podés modificar el return de login_account así:
-
-python
 @app.route("/login_account", methods=["POST"])
 def login_account():
     data = request.json or {}
@@ -327,6 +319,7 @@ def login_account():
     if saved_hwid and saved_hwid != hwid:
         return jsonify({"error": True, "status": "HWID mismatch"}), 403
 
+    # Si la cuenta no tenía HWID aún, se lo seteamos ahora
     if not saved_hwid:
         acc["hwid"] = hwid
         new_content = "\n".join(f"{k}={v}" for k, v in acc.items())
@@ -335,6 +328,7 @@ def login_account():
         except Exception:
             pass
 
+    # Validar / actualizar registry de dispositivos
     devices = download_devices_registry()
     owner = devices.get(hwid)
     if owner and owner != username:
@@ -346,10 +340,16 @@ def login_account():
     except Exception as e:
         print(f"[DEVICES] error updating registry: {e}")
 
-    # === NUEVO: obtener juegos (como /games) ===
+    # === NUEVO: loader y games, todo en la respuesta del login ===
     try:
-        files = list_files("/elementos")
-        zip_files = [f for f in files if f["name"].lower().endswith(".zip")]
+        loader_files = list_files("/loader")
+    except Exception as e:
+        loader_files = []
+        print(f"[LOADER] error listing loader files: {e}")
+
+    try:
+        game_files = list_files("/elementos")
+        zip_files = [f for f in game_files if f["name"].lower().endswith(".zip")]
     except Exception as e:
         zip_files = []
         print(f"[GAMES] error listing games: {e}")
@@ -358,8 +358,10 @@ def login_account():
         "error": False,
         "status": "Login successful",
         "account": acc,
-        "games": zip_files,   # <-- acá los mandás en el JSON
+        "files": loader_files,  # archivos del loader
+        "games": zip_files      # solo los .zip de /elementos
     }), 200
+
 
 
 @app.route("/games", methods=["GET"])
