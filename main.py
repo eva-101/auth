@@ -340,27 +340,21 @@ def login_account():
     except Exception as e:
         print(f"[DEVICES] error updating registry: {e}")
 
-    # === NUEVO: loader y games, todo en la respuesta del login ===
+    # === SOLO JUEGOS de /elementos ===
     try:
-        loader_files = list_files("/loader")
+        files = list_files("/elementos")
+        games = [f for f in files if f["name"].lower().endswith(".zip")]
     except Exception as e:
-        loader_files = []
-        print(f"[LOADER] error listing loader files: {e}")
-
-    try:
-        game_files = list_files("/elementos")
-        zip_files = [f for f in game_files if f["name"].lower().endswith(".zip")]
-    except Exception as e:
-        zip_files = []
+        games = []
         print(f"[GAMES] error listing games: {e}")
 
     return jsonify({
         "error": False,
         "status": "Login successful",
         "account": acc,
-        "files": loader_files,  # archivos del loader
-        "games": zip_files      # solo los .zip de /elementos
+        "games": games    # solo juegos de /elementos
     }), 200
+
 
 
 
@@ -502,4 +496,5 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
 
