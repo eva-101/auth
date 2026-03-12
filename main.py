@@ -285,6 +285,14 @@ def create_account():
     return jsonify({"error": False, "status": "Account created", "account": account_data}), 201
 
 
+Sí, te entiendo perfectamente: querés que el endpoint de login de cuenta (/login_account) también devuelva en el JSON la info de juegos y/o loader igual que hace /validate y /games.
+
+Te dejo dos opciones claras.
+
+Opción 1: Solo agregar games al login
+Si querés que el login de cuenta devuelva la lista de juegos (los .zip de /elementos), podés modificar el return de login_account así:
+
+python
 @app.route("/login_account", methods=["POST"])
 def login_account():
     data = request.json or {}
@@ -338,10 +346,19 @@ def login_account():
     except Exception as e:
         print(f"[DEVICES] error updating registry: {e}")
 
+    # === NUEVO: obtener juegos (como /games) ===
+    try:
+        files = list_files("/elementos")
+        zip_files = [f for f in files if f["name"].lower().endswith(".zip")]
+    except Exception as e:
+        zip_files = []
+        print(f"[GAMES] error listing games: {e}")
+
     return jsonify({
         "error": False,
         "status": "Login successful",
-        "account": acc
+        "account": acc,
+        "games": zip_files,   # <-- acá los mandás en el JSON
     }), 200
 
 
@@ -483,3 +500,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
