@@ -22,6 +22,8 @@ SELF_BASE_URL = os.environ.get("SELF_BASE_URL", "https://auth-clco.onrender.com"
 KEEPALIVE_INTERVAL = int(os.environ.get("KEEPALIVE_INTERVAL", 60))
 KEEPALIVE_RUNNING = True
 
+USERNAME_REGISTRY_PATH = os.environ.get("USERNAME_REGISTRY_PATH", "/accounts/_usernames.json")
+
 
 def get_uptime():
     s = int(time.time() - SERVER_START_TIME)
@@ -232,6 +234,43 @@ def upload_devices_registry(registry: dict) -> None:
     r.raise_for_status()
 
 
+def download_username_registry() -> dict:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "{USERNAME_REGISTRY_PATH}"}}',
+    }
+    try:
+        r = requests.post(
+            "https://content.dropboxapi.com/2/files/download",
+            headers=headers,
+        )
+        r.raise_for_status()
+        content = r.text
+        data = json.loads(content)
+        if isinstance(data, dict):
+            return data
+        return {}
+    except Exception:
+        return {}
+
+
+def upload_username_registry(registry: dict) -> None:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "{USERNAME_REGISTRY_PATH}", "mode": "overwrite"}}',
+        "Content-Type": "application/octet-stream",
+    }
+    content = json.dumps(registry, separators=(",", ":"), ensure_ascii=False)
+    r = requests.post(
+        "https://content.dropboxapi.com/2/files/upload",
+        headers=headers,
+        data=content.encode("utf-8"),
+    )
+    r.raise_for_status()
+
+
 @app.route("/create_account", methods=["POST"])
 def create_account():
     data = request.json or {}
@@ -239,26 +278,22 @@ def create_account():
     username = (data.get("username") or "").strip()
     password = (data.get("password") or "").strip()
     avatar_url = (data.get("avatar_url") or "").strip()
-    hwid = (data.get("hwid") or "").strip()
 
     if not username or not password:
-        return jsonify({"error": True, "status": "Username and password required"}), 400
-
-    if not hwid:
-        return jsonify({"error": True, "status": "HWID required"}), 400
+        return jsonify({"error": True, "code": "MISSING_FIELDS", "status": "Username and password are required"}), 400
 
     if len(username) < 3:
-        return jsonify({"error": True, "status": "Username too short"}), 400
+        return jsonify({"error": True, "code": "USERNAME_TOO_SHORT", "status": "Username must have at least 3 characters"}), 400
     if len(password) < 4:
-        return jsonify({"error": True, "status": "Password too short"}), 400
+        return jsonify({"error": True, "code": "PASSWORD_TOO_SHORT", "status": "Password must have at least 4 characters"}), 400
 
-    devices = download_devices_registry()
-    if hwid in devices and devices[hwid] != username:
-        return jsonify({"error": True, "status": "This device already has an account"}), 403
+    registry = download_username_registry()
+    if username in registry:
+        return jsonify({"error": True, "code": "USERNAME_TAKEN", "status": "This username is already in use"}), 409
 
     try:
         _ = download_account(username)
-        return jsonify({"error": True, "status": "Username already exists"}), 409
+        return jsonify({"error": True, "code": "USERNAME_TAKEN", "status": "This username is already in use"}), 409
     except Exception:
         pass
 
@@ -267,22 +302,21 @@ def create_account():
         "password": password,
         "avatar_url": avatar_url,
         "created_at": datetime.now().isoformat(),
-        "hwid": hwid,
     }
 
     content = "\n".join(f"{k}={v}" for k, v in account_data.items())
     try:
         upload_account(username, content)
     except Exception as e:
-        return jsonify({"error": True, "status": f"Error saving account: {e}"}), 500
+        return jsonify({"error": True, "code": "ACCOUNT_SAVE_ERROR", "status": f"Error saving account: {e}"}), 500
 
-    devices[hwid] = username
+    registry[username] = {"created_at": account_data["created_at"]}
     try:
-        upload_devices_registry(devices)
+        upload_username_registry(registry)
     except Exception as e:
-        print(f"[DEVICES] error updating registry: {e}")
+        print(f"[USERNAMES] error updating registry: {e}")
 
-    return jsonify({"error": False, "status": "Account created", "account": account_data}), 201
+    return jsonify({"error": False, "status": "Account created successfully", "account": account_data}), 201
 
 
 @app.route("/login_account", methods=["POST"])
@@ -291,18 +325,14 @@ def login_account():
 
     username = (data.get("username") or "").strip()
     password = (data.get("password") or "").strip()
-    hwid = (data.get("hwid") or "").strip()
 
     if not username or not password:
-        return jsonify({"error": True, "status": "Username and password required"}), 400
-
-    if not hwid:
-        return jsonify({"error": True, "status": "HWID required"}), 400
+        return jsonify({"error": True, "code": "MISSING_FIELDS", "status": "Username and password are required"}), 400
 
     try:
         content = download_account(username)
     except Exception:
-        return jsonify({"error": True, "status": "Account not found"}), 404
+        return jsonify({"error": True, "code": "ACCOUNT_NOT_FOUND", "status": "Account does not exist"}), 404
 
     acc = {}
     for line in content.splitlines():
@@ -313,34 +343,8 @@ def login_account():
         acc[k.strip()] = v.strip()
 
     if acc.get("password") != password:
-        return jsonify({"error": True, "status": "Incorrect password"}), 403
+        return jsonify({"error": True, "code": "INVALID_PASSWORD", "status": "The password is incorrect"}), 403
 
-    saved_hwid = acc.get("hwid", "")
-    if saved_hwid and saved_hwid != hwid:
-        return jsonify({"error": True, "status": "HWID mismatch"}), 403
-
-    # Si la cuenta no tenía HWID aún, se lo seteamos ahora
-    if not saved_hwid:
-        acc["hwid"] = hwid
-        new_content = "\n".join(f"{k}={v}" for k, v in acc.items())
-        try:
-            upload_account(username, new_content)
-        except Exception:
-            pass
-
-    # Validar / actualizar registry de dispositivos
-    devices = download_devices_registry()
-    owner = devices.get(hwid)
-    if owner and owner != username:
-        return jsonify({"error": True, "status": "This device already has another account"}), 403
-
-    devices[hwid] = username
-    try:
-        upload_devices_registry(devices)
-    except Exception as e:
-        print(f"[DEVICES] error updating registry: {e}")
-
-    # === SOLO JUEGOS de /elementos ===
     try:
         files = list_files("/elementos")
         games = [f for f in files if f["name"].lower().endswith(".zip")]
@@ -352,10 +356,8 @@ def login_account():
         "error": False,
         "status": "Login successful",
         "account": acc,
-        "games": games    # solo juegos de /elementos
+        "games": games
     }), 200
-
-
 
 
 @app.route("/games", methods=["GET"])
@@ -496,5 +498,3 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-
