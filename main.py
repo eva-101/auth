@@ -22,8 +22,14 @@ self_base_url = os.environ.get("SELF_BASE_URL", "https://auth-clco.onrender.com"
 keepalive_interval = int(os.environ.get("KEEPALIVE_INTERVAL", 60))
 keepalive_running = True
 
-username_registry_path = os.environ.get("USERNAME_REGISTRY_PATH", "/accounts/_usernames.json")
+username_registry_path = os.environ.get(
+    "USERNAME_REGISTRY_PATH", "/accounts/_usernames.json"
+)
 
+
+# ============================
+# UTILS GENERALES
+# ============================
 
 def get_uptime():
     segundos = int(time.time() - server_start_time)
@@ -55,6 +61,10 @@ def get_access_token():
     return access_token
 
 
+# ============================
+# DROPBOX HELPERS (LICENSES / ACCOUNTS)
+# ============================
+
 def download_license(username: str) -> str:
     token = get_access_token()
     headers = {
@@ -85,6 +95,57 @@ def upload_license(username: str, content: str) -> bool:
     )
     r.raise_for_status()
     return True
+
+
+def download_account(username: str) -> str:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "/accounts/{username}.txt"}}',
+    }
+    r = requests.post(
+        "https://content.dropboxapi.com/2/files/download",
+        headers=headers,
+    )
+    r.raise_for_status()
+    return r.text
+
+
+def upload_account(username: str, content: str) -> bool:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Dropbox-API-Arg": f'{{"path": "/accounts/{username}.txt", "mode": "overwrite"}}',
+        "Content-Type": "application/octet-stream",
+    }
+    r = requests.post(
+        "https://content.dropboxapi.com/2/files/upload",
+        headers=headers,
+        data=content.encode(),
+    )
+    r.raise_for_status()
+    return True
+
+
+def rename_account_file(old_username: str, new_username: str) -> None:
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "from_path": f"/accounts/{old_username}.txt",
+        "to_path": f"/accounts/{new_username}.txt",
+        "autorename": False,
+        "allow_shared_folder": False,
+        "allow_ownership_transfer": False,
+    }
+    r = requests.post(
+        "https://api.dropboxapi.com/2/files/move_v2",
+        headers=headers,
+        json=data,
+    )
+    r.raise_for_status()
 
 
 def list_files(folder_path: str):
@@ -144,79 +205,6 @@ def count_loader_files() -> int:
         return 0
 
 
-def keepalive_bot():
-    global keepalive_running
-    url = f"{self_base_url}/validate"
-
-    while keepalive_running:
-        try:
-            payload = {
-                "username": "PING_KEEPALIVE",
-                "password": "",
-            }
-            headers = {"Content-Type": "application/json"}
-            requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
-        except Exception:
-            pass
-        time.sleep(keepalive_interval)
-
-
-def start_keepalive_thread():
-    t = threading.Thread(target=keepalive_bot, daemon=True)
-    t.start()
-
-
-def download_account(username: str) -> str:
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": f'{{"path": "/accounts/{username}.txt"}}',
-    }
-    r = requests.post(
-        "https://content.dropboxapi.com/2/files/download",
-        headers=headers,
-    )
-    r.raise_for_status()
-    return r.text
-
-
-def upload_account(username: str, content: str) -> bool:
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": f'{{"path": "/accounts/{username}.txt", "mode": "overwrite"}}',
-        "Content-Type": "application/octet-stream",
-    }
-    r = requests.post(
-        "https://content.dropboxapi.com/2/files/upload",
-        headers=headers,
-        data=content.encode(),
-    )
-    r.raise_for_status()
-    return True
-
-
-def rename_account_file(old_username: str, new_username: str) -> None:
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    data = {
-        "from_path": f"/accounts/{old_username}.txt",
-        "to_path": f"/accounts/{new_username}.txt",
-        "autorename": False,
-        "allow_shared_folder": False,
-        "allow_ownership_transfer": False,
-    }
-    r = requests.post(
-        "https://api.dropboxapi.com/2/files/move_v2",
-        headers=headers,
-        json=data,
-    )
-    r.raise_for_status()
-
-
 def download_username_registry() -> dict:
     token = get_access_token()
     headers = {
@@ -255,11 +243,37 @@ def upload_username_registry(registry: dict) -> None:
 
 
 # ============================
-# HELPERS PARA SESIONES JUEGO
+# KEEPALIVE
 # ============================
 
-def parse_license_text_to_dict(text: str) -> dict:
-    lic = {}
+def keepalive_bot():
+    global keepalive_running
+    url = f"{self_base_url}/validate"
+
+    while keepalive_running:
+        try:
+            payload = {
+                "username": "PING_KEEPALIVE",
+                "password": "",
+            }
+            headers = {"Content-Type": "application/json"}
+            requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+        except Exception:
+            pass
+        time.sleep(keepalive_interval)
+
+
+def start_keepalive_thread():
+    t = threading.Thread(target=keepalive_bot, daemon=True)
+    t.start()
+
+
+# ============================
+# HELPERS SESIONES (COMUNES)
+# ============================
+
+def parse_text_with_sessions(text: str) -> dict:
+    data = {}
     roles_dict = {}
     sessions_json = {}
 
@@ -280,49 +294,49 @@ def parse_license_text_to_dict(text: str) -> dict:
                 sessions_json = {}
         elif "=" in line:
             k, v = line.split("=", 1)
-            lic[k.strip()] = v.strip()
+            data[k.strip()] = v.strip()
 
-    lic["roles"] = roles_dict
-    lic["sessions_json"] = sessions_json
-    return lic
+    data["roles"] = roles_dict
+    data["sessions_json"] = sessions_json
+    return data
 
 
-def license_dict_to_text(lic: dict) -> str:
-    # roles se guarda como dict en texto literal
-    roles = lic.get("roles", {})
-    sessions_json = lic.get("sessions_json", {})
+def dict_to_text_with_sessions(d: dict) -> str:
+    roles = d.get("roles", {})
+    sessions_json = d.get("sessions_json", {})
 
     lines = []
-    for k, v in lic.items():
+    for k, v in d.items():
         if k in ("roles", "sessions_json"):
             continue
         lines.append(f"{k}={v}")
 
     lines.append(f"roles={roles}")
-    lines.append(f"sessions_json={json.dumps(sessions_json, separators=(',', ':'))}")
+    lines.append(
+        f"sessions_json={json.dumps(sessions_json, separators=(',', ':'))}"
+    )
     return "\n".join(lines)
 
 
-def parse_sessions(lic: dict) -> dict:
-    sessions = lic.get("sessions_json")
+def parse_sessions(d: dict) -> dict:
+    sessions = d.get("sessions_json")
     if isinstance(sessions, dict):
         return sessions
     return {}
 
 
-def add_session(lic: dict, game_name: str, start_iso: str, end_iso: str, seconds: int):
-    sessions = parse_sessions(lic)
+def add_session(d: dict, game_name: str, start_iso: str, end_iso: str, seconds: int):
+    sessions = parse_sessions(d)
     if game_name not in sessions:
         sessions[game_name] = []
     sessions[game_name].append(
         {"start": start_iso, "end": end_iso, "seconds": int(seconds)}
     )
-    lic["sessions_json"] = sessions
+    d["sessions_json"] = sessions
 
 
 # ============================
-# RUTAS EXISTENTES
-# (create_account, login_account, validate, etc.)
+# RUTAS ACCOUNTS
 # ============================
 
 @app.route("/update_account", methods=["POST"])
@@ -335,12 +349,24 @@ def update_account():
     new_avatar_url = (data.get("new_avatar_url") or "").strip()
 
     if not current_username:
-        return jsonify({"error": True, "code": "MISSING_FIELDS", "status": "El usuario actual es obligatorio."}), 400
+        return jsonify(
+            {
+                "error": True,
+                "code": "MISSING_FIELDS",
+                "status": "El usuario actual es obligatorio.",
+            }
+        ), 400
 
     try:
         content = download_account(current_username)
     except Exception:
-        return jsonify({"error": True, "code": "ACCOUNT_NOT_FOUND", "status": "La cuenta no existe."}), 404
+        return jsonify(
+            {
+                "error": True,
+                "code": "ACCOUNT_NOT_FOUND",
+                "status": "La cuenta no existe.",
+            }
+        ), 404
 
     acc = {}
     for line in content.splitlines():
@@ -377,20 +403,24 @@ def update_account():
     if new_username and new_username != old_username:
         if ahora - last_username_change_at < min_delta:
             restante = min_delta - (ahora - last_username_change_at)
-            return jsonify({
-                "error": True,
-                "code": "USERNAME_CHANGE_COOLDOWN",
-                "status": "No puedes cambiar el usuario todavía.",
-                "seconds_remaining": int(restante.total_seconds())
-            }), 403
+            return jsonify(
+                {
+                    "error": True,
+                    "code": "USERNAME_CHANGE_COOLDOWN",
+                    "status": "No puedes cambiar el usuario todavía.",
+                    "seconds_remaining": int(restante.total_seconds()),
+                }
+            ), 403
 
         registry = download_username_registry()
         if new_username in registry:
-            return jsonify({
-                "error": True,
-                "code": "USERNAME_TAKEN",
-                "status": "Este usuario ya está en uso."
-            }), 409
+            return jsonify(
+                {
+                    "error": True,
+                    "code": "USERNAME_TAKEN",
+                    "status": "Este usuario ya está en uso.",
+                }
+            ), 409
 
         acc["username"] = new_username
         acc["last_username_change_at"] = ahora.isoformat()
@@ -403,43 +433,51 @@ def update_account():
         try:
             rename_account_file(current_username, new_username)
         except Exception as e:
-            return jsonify({
-                "error": True,
-                "code": "ACCOUNT_RENAME_ERROR",
-                "status": f"No se pudo renombrar el archivo de cuenta: {e}",
-            }), 500
+            return jsonify(
+                {
+                    "error": True,
+                    "code": "ACCOUNT_RENAME_ERROR",
+                    "status": f"No se pudo renombrar el archivo de cuenta: {e}",
+                }
+            ), 500
 
         current_username = new_username
 
     if new_password:
         if len(new_password) < 4:
-            return jsonify({
-                "error": True,
-                "code": "PASSWORD_TOO_SHORT",
-                "status": "La contraseña debe tener al menos 4 caracteres."
-            }), 400
+            return jsonify(
+                {
+                    "error": True,
+                    "code": "PASSWORD_TOO_SHORT",
+                    "status": "La contraseña debe tener al menos 4 caracteres.",
+                }
+            ), 400
         acc["password"] = new_password
 
     if new_avatar_url and new_avatar_url != acc.get("avatar_url"):
         if ahora - last_avatar_change_at < min_delta:
             restante = min_delta - (ahora - last_avatar_change_at)
-            return jsonify({
-                "error": True,
-                "code": "AVATAR_CHANGE_COOLDOWN",
-                "status": "No puedes cambiar el avatar todavía.",
-                "seconds_remaining": int(restante.total_seconds())
-            }), 403
+            return jsonify(
+                {
+                    "error": True,
+                    "code": "AVATAR_CHANGE_COOLDOWN",
+                    "status": "No puedes cambiar el avatar todavía.",
+                    "seconds_remaining": int(restante.total_seconds()),
+                }
+            ), 403
         acc["avatar_url"] = new_avatar_url
         acc["last_avatar_change_at"] = ahora.isoformat()
 
     contenido = "\n".join(f"{k}={v}" for k, v in acc.items())
     upload_account(current_username, contenido)
 
-    return jsonify({
-        "error": False,
-        "status": "Cuenta actualizada.",
-        "account": acc
-    }), 200
+    return jsonify(
+        {
+            "error": False,
+            "status": "Cuenta actualizada.",
+            "account": acc,
+        }
+    ), 200
 
 
 @app.route("/create_account", methods=["POST"])
@@ -451,21 +489,51 @@ def create_account():
     avatar_url = (data.get("avatar_url") or "").strip()
 
     if not username or not password:
-        return jsonify({"error": True, "code": "MISSING_FIELDS", "status": "Usuario y contraseña son obligatorios."}), 400
+        return jsonify(
+            {
+                "error": True,
+                "code": "MISSING_FIELDS",
+                "status": "Usuario y contraseña son obligatorios.",
+            }
+        ), 400
 
     if len(username) < 3:
-        return jsonify({"error": True, "code": "USERNAME_TOO_SHORT", "status": "El usuario debe tener al menos 3 caracteres."}), 400
+        return jsonify(
+            {
+                "error": True,
+                "code": "USERNAME_TOO_SHORT",
+                "status": "El usuario debe tener al menos 3 caracteres.",
+            }
+        ), 400
 
     if len(password) < 4:
-        return jsonify({"error": True, "code": "PASSWORD_TOO_SHORT", "status": "La contraseña debe tener al menos 4 caracteres."}), 400
+        return jsonify(
+            {
+                "error": True,
+                "code": "PASSWORD_TOO_SHORT",
+                "status": "La contraseña debe tener al menos 4 caracteres.",
+            }
+        ), 400
 
     registry = download_username_registry()
     if username in registry:
-        return jsonify({"error": True, "code": "USERNAME_TAKEN", "status": "Este usuario ya está en uso."}), 409
+        return jsonify(
+            {
+                "error": True,
+                "code": "USERNAME_TAKEN",
+                "status": "Este usuario ya está en uso.",
+            }
+        ), 409
 
     try:
         _ = download_account(username)
-        return jsonify({"error": True, "code": "USERNAME_TAKEN", "status": "Este usuario ya está en uso."}), 409
+        return jsonify(
+            {
+                "error": True,
+                "code": "USERNAME_TAKEN",
+                "status": "Este usuario ya está en uso.",
+            }
+        ), 409
     except Exception:
         pass
 
@@ -483,7 +551,13 @@ def create_account():
     try:
         upload_account(username, contenido)
     except Exception as e:
-        return jsonify({"error": True, "code": "ACCOUNT_SAVE_ERROR", "status": f"Error al guardar la cuenta: {e}"}), 500
+        return jsonify(
+            {
+                "error": True,
+                "code": "ACCOUNT_SAVE_ERROR",
+                "status": f"Error al guardar la cuenta: {e}",
+            }
+        ), 500
 
     registry[username] = {"created_at": account_data["created_at"]}
     try:
@@ -491,7 +565,13 @@ def create_account():
     except Exception:
         pass
 
-    return jsonify({"error": False, "status": "Cuenta creada correctamente.", "account": account_data}), 201
+    return jsonify(
+        {
+            "error": False,
+            "status": "Cuenta creada correctamente.",
+            "account": account_data,
+        }
+    ), 201
 
 
 @app.route("/login_account", methods=["POST"])
@@ -502,12 +582,24 @@ def login_account():
     password = (data.get("password") or "").strip()
 
     if not username or not password:
-        return jsonify({"error": True, "code": "MISSING_FIELDS", "status": "Usuario y contraseña son obligatorios."}), 400
+        return jsonify(
+            {
+                "error": True,
+                "code": "MISSING_FIELDS",
+                "status": "Usuario y contraseña son obligatorios.",
+            }
+        ), 400
 
     try:
         content = download_account(username)
     except Exception:
-        return jsonify({"error": True, "code": "ACCOUNT_NOT_FOUND", "status": "La cuenta no existe."}), 404
+        return jsonify(
+            {
+                "error": True,
+                "code": "ACCOUNT_NOT_FOUND",
+                "status": "La cuenta no existe.",
+            }
+        ), 404
 
     acc = {}
     for line in content.splitlines():
@@ -518,7 +610,13 @@ def login_account():
         acc[k.strip()] = v.strip()
 
     if acc.get("password") != password:
-        return jsonify({"error": True, "code": "INVALID_PASSWORD", "status": "La contraseña es incorrecta."}), 403
+        return jsonify(
+            {
+                "error": True,
+                "code": "INVALID_PASSWORD",
+                "status": "La contraseña es incorrecta.",
+            }
+        ), 403
 
     try:
         files = list_files("/elementos")
@@ -526,12 +624,14 @@ def login_account():
     except Exception:
         games = []
 
-    return jsonify({
-        "error": False,
-        "status": "Inicio de sesión correcto.",
-        "account": acc,
-        "games": games
-    }), 200
+    return jsonify(
+        {
+            "error": False,
+            "status": "Inicio de sesión correcto.",
+            "account": acc,
+            "games": games,
+        }
+    ), 200
 
 
 @app.route("/games", methods=["GET"])
@@ -543,12 +643,12 @@ def games():
 
     zip_files = [f for f in files if f["name"].lower().endswith(".zip")]
 
-    return jsonify({
-        "error": False,
-        "status": "ok",
-        "files": zip_files
-    }), 200
+    return jsonify({"error": False, "status": "ok", "files": zip_files}), 200
 
+
+# ============================
+# VALIDATE (LICENCIAS)
+# ============================
 
 @app.route("/validate", methods=["POST"])
 def validate():
@@ -580,14 +680,12 @@ def validate():
     except Exception:
         return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
 
-    lic = parse_license_text_to_dict(content)
+    lic = parse_text_with_sessions(content)
 
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Contraseña incorrecta."}), 403
 
-    expire_date = datetime.fromisoformat(
-        lic.get("expires", "2100-01-01T00:00:00")
-    )
+    expire_date = datetime.fromisoformat(lic.get("expires", "2100-01-01T00:00:00"))
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "Licencia expirada."}), 403
 
@@ -609,11 +707,13 @@ def validate():
                 actualizado = True
 
         if actualizado:
-            upload_license(username, license_dict_to_text(lic))
+            upload_license(username, dict_to_text_with_sessions(lic))
 
         for k, v in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
             if v and lic.get(k) and v != lic.get(k):
-                return jsonify({"error": True, "status": f"{k.upper()} no coincide."}), 403
+                return jsonify(
+                    {"error": True, "status": f"{k.upper()} no coincide."}
+                ), 403
 
     try:
         loader_files = list_files("/loader")
@@ -637,50 +737,61 @@ def validate():
 
 
 # ============================
-# RUTAS PARA TRACKING DE SESIONES
+# TRACKING SESIONES - LICENSE
 # ============================
 
-@app.route("/start_session", methods=["POST"])
-def start_session():
+@app.route("/start_session_license", methods=["POST"])
+def start_session_license():
     data = request.json or {}
     username = (data.get("username") or "").strip()
     game_name = (data.get("game_name") or "").strip()
 
     if not username or not game_name:
-        return jsonify({"error": True, "status": "username y game_name son obligatorios."}), 400
+        return jsonify(
+            {
+                "error": True,
+                "status": "username y game_name son obligatorios.",
+            }
+        ), 400
 
     try:
         content = download_license(username)
     except Exception:
         return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
 
-    lic = parse_license_text_to_dict(content)
+    _ = parse_text_with_sessions(content)
 
-    # guardamos solo start_time en memoria del cliente, el server solo responde
     start_time = datetime.utcnow().isoformat()
-    return jsonify({
-        "error": False,
-        "status": "Sesion iniciada.",
-        "start_time": start_time,
-    }), 200
+    return jsonify(
+        {
+            "error": False,
+            "status": "Sesion iniciada (license).",
+            "start_time": start_time,
+        }
+    ), 200
 
 
-@app.route("/end_session", methods=["POST"])
-def end_session():
+@app.route("/end_session_license", methods=["POST"])
+def end_session_license():
     data = request.json or {}
     username = (data.get("username") or "").strip()
     game_name = (data.get("game_name") or "").strip()
     start_time = (data.get("start_time") or "").strip()
 
     if not username or not game_name or not start_time:
-        return jsonify({"error": True, "status": "username, game_name y start_time son obligatorios."}), 400
+        return jsonify(
+            {
+                "error": True,
+                "status": "username, game_name y start_time son obligatorios.",
+            }
+        ), 400
 
     try:
         content = download_license(username)
     except Exception:
         return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
 
-    lic = parse_license_text_to_dict(content)
+    d = parse_text_with_sessions(content)
 
     try:
         dt_start = datetime.fromisoformat(start_time)
@@ -691,26 +802,118 @@ def end_session():
     seconds = int((dt_end - dt_start).total_seconds())
 
     add_session(
-        lic,
+        d,
         game_name=game_name,
         start_iso=dt_start.isoformat(),
         end_iso=dt_end.isoformat(),
         seconds=seconds,
     )
 
-    upload_license(username, license_dict_to_text(lic))
+    upload_license(username, dict_to_text_with_sessions(d))
 
-    return jsonify({
-        "error": False,
-        "status": "Sesion registrada.",
-        "seconds": seconds,
-        "minutes": round(seconds / 60, 2),
-        "hours": round(seconds / 3600, 2),
-    }), 200
+    return jsonify(
+        {
+            "error": False,
+            "status": "Sesion registrada (license).",
+            "seconds": seconds,
+            "minutes": round(seconds / 60, 2),
+            "hours": round(seconds / 3600, 2),
+        }
+    ), 200
 
 
-@app.route("/sessions/<username>", methods=["GET"])
-def get_sessions(username):
+# ============================
+# TRACKING SESIONES - ACCOUNT
+# ============================
+
+@app.route("/start_session_account", methods=["POST"])
+def start_session_account():
+    data = request.json or {}
+    username = (data.get("username") or "").strip()
+    game_name = (data.get("game_name") or "").strip()
+
+    if not username or not game_name:
+        return jsonify(
+            {
+                "error": True,
+                "status": "username y game_name son obligatorios.",
+            }
+        ), 400
+
+    try:
+        content = download_account(username)
+    except Exception:
+        return jsonify({"error": True, "status": "Cuenta no encontrada."}), 404
+
+    _ = parse_text_with_sessions(content)
+
+    start_time = datetime.utcnow().isoformat()
+    return jsonify(
+        {
+            "error": False,
+            "status": "Sesion iniciada (account).",
+            "start_time": start_time,
+        }
+    ), 200
+
+
+@app.route("/end_session_account", methods=["POST"])
+def end_session_account():
+    data = request.json or {}
+    username = (data.get("username") or "").strip()
+    game_name = (data.get("game_name") or "").strip()
+    start_time = (data.get("start_time") or "").strip()
+
+    if not username or not game_name or not start_time:
+        return jsonify(
+            {
+                "error": True,
+                "status": "username, game_name y start_time son obligatorios.",
+            }
+        ), 400
+
+    try:
+        content = download_account(username)
+    except Exception:
+        return jsonify({"error": True, "status": "Cuenta no encontrada."}), 404
+
+    d = parse_text_with_sessions(content)
+
+    try:
+        dt_start = datetime.fromisoformat(start_time)
+    except Exception:
+        return jsonify({"error": True, "status": "start_time invalido."}), 400
+
+    dt_end = datetime.utcnow()
+    seconds = int((dt_end - dt_start).total_seconds())
+
+    add_session(
+        d,
+        game_name=game_name,
+        start_iso=dt_start.isoformat(),
+        end_iso=dt_end.isoformat(),
+        seconds=seconds,
+    )
+
+    upload_account(username, dict_to_text_with_sessions(d))
+
+    return jsonify(
+        {
+            "error": False,
+            "status": "Sesion registrada (account).",
+            "seconds": seconds,
+            "minutes": round(seconds / 60, 2),
+            "hours": round(seconds / 3600, 2),
+        }
+    ), 200
+
+
+# ============================
+# GET SESSIONS (LICENSE / ACCOUNT)
+# ============================
+
+@app.route("/sessions_license/<username>", methods=["GET"])
+def get_sessions_license(username):
     username = (username or "").strip()
     if not username:
         return jsonify({"error": True, "status": "username requerido."}), 400
@@ -720,14 +923,30 @@ def get_sessions(username):
     except Exception:
         return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
 
-    lic = parse_license_text_to_dict(content)
-    sessions = parse_sessions(lic)
-    return jsonify({
-        "error": False,
-        "status": "ok",
-        "sessions": sessions,
-    }), 200
+    d = parse_text_with_sessions(content)
+    sessions = parse_sessions(d)
+    return jsonify({"error": False, "status": "ok", "sessions": sessions}), 200
 
+
+@app.route("/sessions_account/<username>", methods=["GET"])
+def get_sessions_account(username):
+    username = (username or "").strip()
+    if not username:
+        return jsonify({"error": True, "status": "username requerido."}), 400
+
+    try:
+        content = download_account(username)
+    except Exception:
+        return jsonify({"error": True, "status": "Cuenta no encontrada."}), 404
+
+    d = parse_text_with_sessions(content)
+    sessions = parse_sessions(d)
+    return jsonify({"error": False, "status": "ok", "sessions": sessions}), 200
+
+
+# ============================
+# MAIN
+# ============================
 
 if __name__ == "__main__":
     import logging
