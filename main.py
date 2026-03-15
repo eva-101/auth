@@ -196,43 +196,6 @@ def upload_account(username: str, content: str) -> bool:
     return True
 
 
-def download_devices_registry() -> dict:
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": '{"path": "/accounts/_devices.json"}',
-    }
-    try:
-        r = requests.post(
-            "https://content.dropboxapi.com/2/files/download",
-            headers=headers,
-        )
-        r.raise_for_status()
-        content = r.text
-        data = json.loads(content)
-        if isinstance(data, dict):
-            return data
-        return {}
-    except Exception:
-        return {}
-
-
-def upload_devices_registry(registry: dict) -> None:
-    token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Dropbox-API-Arg": '{"path": "/accounts/_devices.json", "mode": "overwrite"}',
-        "Content-Type": "application/octet-stream",
-    }
-    content = json.dumps(registry, separators=(",", ":"), ensure_ascii=False)
-    r = requests.post(
-        "https://content.dropboxapi.com/2/files/upload",
-        headers=headers,
-        data=content.encode("utf-8"),
-    )
-    r.raise_for_status()
-
-
 def download_username_registry() -> dict:
     token = get_access_token()
     headers = {
@@ -273,16 +236,17 @@ def upload_username_registry(registry: dict) -> None:
 @app.route("/update_account", methods=["POST"])
 def update_account():
     data = request.json or {}
-    username = (data.get("username") or "").strip()
+
+    current_username = (data.get("current_username") or "").strip()
     new_username = (data.get("new_username") or "").strip()
     new_password = (data.get("new_password") or "").strip()
     new_avatar_url = (data.get("new_avatar_url") or "").strip()
 
-    if not username:
-        return jsonify({"error": True, "code": "MISSING_FIELDS", "status": "El nombre de usuario es obligatorio."}), 400
+    if not current_username:
+        return jsonify({"error": True, "code": "MISSING_FIELDS", "status": "El usuario actual es obligatorio."}), 400
 
     try:
-        content = download_account(username)
+        content = download_account(current_username)
     except Exception:
         return jsonify({"error": True, "code": "ACCOUNT_NOT_FOUND", "status": "La cuenta no existe."}), 404
 
@@ -309,13 +273,22 @@ def update_account():
 
     min_delta = timedelta(days=7)
 
-    if new_username and new_username != acc.get("username"):
+    if "created_at" not in acc:
+        acc["created_at"] = ahora.isoformat()
+    if not last_username_change_at:
+        last_username_change_at = ahora
+    if not last_avatar_change_at:
+        last_avatar_change_at = ahora
+
+    old_username = acc.get("username", current_username)
+
+    if new_username and new_username != old_username:
         if ahora - last_username_change_at < min_delta:
             restante = min_delta - (ahora - last_username_change_at)
             return jsonify({
                 "error": True,
                 "code": "USERNAME_CHANGE_COOLDOWN",
-                "status": "No puedes cambiar el nombre de usuario todavía.",
+                "status": "No puedes cambiar el usuario todavía.",
                 "seconds_remaining": int(restante.total_seconds())
             }), 403
 
@@ -324,27 +297,16 @@ def update_account():
             return jsonify({
                 "error": True,
                 "code": "USERNAME_TAKEN",
-                "status": "Este nombre de usuario ya está en uso."
+                "status": "Este usuario ya está en uso."
             }), 409
 
-        old_username = acc["username"]
         acc["username"] = new_username
         acc["last_username_change_at"] = ahora.isoformat()
 
-        registry = download_username_registry()
-        created_at = registry.get(old_username, {}).get("created_at", acc.get("created_at", ahora.isoformat()))
+        created = registry.get(old_username, {}).get("created_at", acc["created_at"])
         registry.pop(old_username, None)
-        registry[new_username] = {"created_at": created_at}
+        registry[new_username] = {"created_at": created}
         upload_username_registry(registry)
-
-        nuevo_contenido = "\n".join(f"{k}={v}" for k, v in acc.items())
-        upload_account(new_username, nuevo_contenido)
-
-        return jsonify({
-            "error": False,
-            "status": "Nombre de usuario actualizado.",
-            "account": acc
-        }), 200
 
     if new_password:
         if len(new_password) < 4:
@@ -367,8 +329,8 @@ def update_account():
         acc["avatar_url"] = new_avatar_url
         acc["last_avatar_change_at"] = ahora.isoformat()
 
-    nuevo_contenido = "\n".join(f"{k}={v}" for k, v in acc.items())
-    upload_account(acc["username"], nuevo_contenido)
+    contenido = "\n".join(f"{k}={v}" for k, v in acc.items())
+    upload_account(current_username, contenido)
 
     return jsonify({
         "error": False,
@@ -405,7 +367,6 @@ def create_account():
         pass
 
     ahora = datetime.now().isoformat()
-
     account_data = {
         "username": username,
         "password": password,
