@@ -197,7 +197,6 @@ def upload_account(username: str, content: str) -> bool:
 
 
 def rename_account_file(old_username: str, new_username: str) -> None:
-    """Renombra /accounts/old_username.txt -> /accounts/new_username.txt usando move_v2."""
     token = get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -216,8 +215,6 @@ def rename_account_file(old_username: str, new_username: str) -> None:
         json=data,
     )
     r.raise_for_status()
-    # si falla, lanzará excepción y lo capturamos desde update_account
-    # docs: files/move_v2 es la forma correcta de renombrar archivos en Dropbox [web:66][web:65]
 
 
 def download_username_registry() -> dict:
@@ -256,6 +253,77 @@ def upload_username_registry(registry: dict) -> None:
     )
     r.raise_for_status()
 
+
+# ============================
+# HELPERS PARA SESIONES JUEGO
+# ============================
+
+def parse_license_text_to_dict(text: str) -> dict:
+    lic = {}
+    roles_dict = {}
+    sessions_json = {}
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("roles="):
+            try:
+                roles_dict = ast.literal_eval(line.split("=", 1)[1])
+            except Exception:
+                roles_dict = {}
+        elif line.lower().startswith("sessions_json="):
+            raw = line.split("=", 1)[1].strip()
+            try:
+                sessions_json = json.loads(raw)
+            except Exception:
+                sessions_json = {}
+        elif "=" in line:
+            k, v = line.split("=", 1)
+            lic[k.strip()] = v.strip()
+
+    lic["roles"] = roles_dict
+    lic["sessions_json"] = sessions_json
+    return lic
+
+
+def license_dict_to_text(lic: dict) -> str:
+    # roles se guarda como dict en texto literal
+    roles = lic.get("roles", {})
+    sessions_json = lic.get("sessions_json", {})
+
+    lines = []
+    for k, v in lic.items():
+        if k in ("roles", "sessions_json"):
+            continue
+        lines.append(f"{k}={v}")
+
+    lines.append(f"roles={roles}")
+    lines.append(f"sessions_json={json.dumps(sessions_json, separators=(',', ':'))}")
+    return "\n".join(lines)
+
+
+def parse_sessions(lic: dict) -> dict:
+    sessions = lic.get("sessions_json")
+    if isinstance(sessions, dict):
+        return sessions
+    return {}
+
+
+def add_session(lic: dict, game_name: str, start_iso: str, end_iso: str, seconds: int):
+    sessions = parse_sessions(lic)
+    if game_name not in sessions:
+        sessions[game_name] = []
+    sessions[game_name].append(
+        {"start": start_iso, "end": end_iso, "seconds": int(seconds)}
+    )
+    lic["sessions_json"] = sessions
+
+
+# ============================
+# RUTAS EXISTENTES
+# (create_account, login_account, validate, etc.)
+# ============================
 
 @app.route("/update_account", methods=["POST"])
 def update_account():
@@ -306,7 +374,6 @@ def update_account():
 
     old_username = acc.get("username", current_username)
 
-    # cambio de username
     if new_username and new_username != old_username:
         if ahora - last_username_change_at < min_delta:
             restante = min_delta - (ahora - last_username_change_at)
@@ -333,7 +400,6 @@ def update_account():
         registry[new_username] = {"created_at": created}
         upload_username_registry(registry)
 
-        # renombrar archivo en Dropbox
         try:
             rename_account_file(current_username, new_username)
         except Exception as e:
@@ -343,10 +409,8 @@ def update_account():
                 "status": f"No se pudo renombrar el archivo de cuenta: {e}",
             }), 500
 
-        # a partir de aquí el archivo ya se llama new_username.txt
         current_username = new_username
 
-    # cambio de password
     if new_password:
         if len(new_password) < 4:
             return jsonify({
@@ -356,7 +420,6 @@ def update_account():
             }), 400
         acc["password"] = new_password
 
-    # cambio de avatar
     if new_avatar_url and new_avatar_url != acc.get("avatar_url"):
         if ahora - last_avatar_change_at < min_delta:
             restante = min_delta - (ahora - last_avatar_change_at)
@@ -517,25 +580,7 @@ def validate():
     except Exception:
         return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
 
-    lines = content.splitlines()
-    lic = {}
-    roles_dict = {}
-
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        if line.lower().startswith("roles="):
-            try:
-                roles_dict = ast.literal_eval(line.split("=", 1)[1])
-            except Exception:
-                roles_dict = {}
-        elif "=" in line:
-            key, value = line.split("=", 1)
-            lic[key.strip()] = value.strip()
-
-    lic["roles"] = roles_dict
+    lic = parse_license_text_to_dict(content)
 
     if lic.get("pass") and lic["pass"] != password:
         return jsonify({"error": True, "status": "Contraseña incorrecta."}), 403
@@ -564,7 +609,7 @@ def validate():
                 actualizado = True
 
         if actualizado:
-            upload_license(username, "\n".join(f"{k}={v}" for k, v in lic.items()))
+            upload_license(username, license_dict_to_text(lic))
 
         for k, v in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
             if v and lic.get(k) and v != lic.get(k):
@@ -589,6 +634,99 @@ def validate():
             "games": game_files,
         }
     ), 200
+
+
+# ============================
+# RUTAS PARA TRACKING DE SESIONES
+# ============================
+
+@app.route("/start_session", methods=["POST"])
+def start_session():
+    data = request.json or {}
+    username = (data.get("username") or "").strip()
+    game_name = (data.get("game_name") or "").strip()
+
+    if not username or not game_name:
+        return jsonify({"error": True, "status": "username y game_name son obligatorios."}), 400
+
+    try:
+        content = download_license(username)
+    except Exception:
+        return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
+
+    lic = parse_license_text_to_dict(content)
+
+    # guardamos solo start_time en memoria del cliente, el server solo responde
+    start_time = datetime.utcnow().isoformat()
+    return jsonify({
+        "error": False,
+        "status": "Sesion iniciada.",
+        "start_time": start_time,
+    }), 200
+
+
+@app.route("/end_session", methods=["POST"])
+def end_session():
+    data = request.json or {}
+    username = (data.get("username") or "").strip()
+    game_name = (data.get("game_name") or "").strip()
+    start_time = (data.get("start_time") or "").strip()
+
+    if not username or not game_name or not start_time:
+        return jsonify({"error": True, "status": "username, game_name y start_time son obligatorios."}), 400
+
+    try:
+        content = download_license(username)
+    except Exception:
+        return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
+
+    lic = parse_license_text_to_dict(content)
+
+    try:
+        dt_start = datetime.fromisoformat(start_time)
+    except Exception:
+        return jsonify({"error": True, "status": "start_time invalido."}), 400
+
+    dt_end = datetime.utcnow()
+    seconds = int((dt_end - dt_start).total_seconds())
+
+    add_session(
+        lic,
+        game_name=game_name,
+        start_iso=dt_start.isoformat(),
+        end_iso=dt_end.isoformat(),
+        seconds=seconds,
+    )
+
+    upload_license(username, license_dict_to_text(lic))
+
+    return jsonify({
+        "error": False,
+        "status": "Sesion registrada.",
+        "seconds": seconds,
+        "minutes": round(seconds / 60, 2),
+        "hours": round(seconds / 3600, 2),
+    }), 200
+
+
+@app.route("/sessions/<username>", methods=["GET"])
+def get_sessions(username):
+    username = (username or "").strip()
+    if not username:
+        return jsonify({"error": True, "status": "username requerido."}), 400
+
+    try:
+        content = download_license(username)
+    except Exception:
+        return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
+
+    lic = parse_license_text_to_dict(content)
+    sessions = parse_sessions(lic)
+    return jsonify({
+        "error": False,
+        "status": "ok",
+        "sessions": sessions,
+    }), 200
 
 
 if __name__ == "__main__":
