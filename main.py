@@ -27,10 +27,6 @@ username_registry_path = os.environ.get(
 )
 
 
-# ============================
-# UTILS GENERALES
-# ============================
-
 def get_uptime():
     segundos = int(time.time() - server_start_time)
     horas = segundos // 3600
@@ -60,10 +56,6 @@ def get_access_token():
     access_token_time = datetime.now()
     return access_token
 
-
-# ============================
-# DROPBOX HELPERS (LICENSES / ACCOUNTS)
-# ============================
 
 def download_license(username: str) -> str:
     token = get_access_token()
@@ -242,10 +234,6 @@ def upload_username_registry(registry: dict) -> None:
     r.raise_for_status()
 
 
-# ============================
-# KEEPALIVE
-# ============================
-
 def keepalive_bot():
     global keepalive_running
     url = f"{self_base_url}/validate"
@@ -267,10 +255,6 @@ def start_keepalive_thread():
     t = threading.Thread(target=keepalive_bot, daemon=True)
     t.start()
 
-
-# ============================
-# HELPERS SESIONES (COMUNES)
-# ============================
 
 def parse_text_with_sessions(text: str) -> dict:
     data = {}
@@ -312,9 +296,7 @@ def dict_to_text_with_sessions(d: dict) -> str:
         lines.append(f"{k}={v}")
 
     lines.append(f"roles={roles}")
-    lines.append(
-        f"sessions_json={json.dumps(sessions_json, separators=(',', ':'))}"
-    )
+    lines.append("sessions_json=" + json.dumps(sessions_json, separators=(",", ":")))
     return "\n".join(lines)
 
 
@@ -327,12 +309,15 @@ def parse_sessions(d: dict) -> dict:
 
 def add_session(d: dict, game_name: str, start_iso: str, end_iso: str, seconds: int):
     sessions = parse_sessions(d)
-    g = sessions.get(game_name, {
-        "total_seconds": 0,
-        "total_sessions": 0,
-        "last_start": "",
-        "last_end": "",
-    })
+    g = sessions.get(
+        game_name,
+        {
+            "total_seconds": 0,
+            "total_sessions": 0,
+            "last_start": "",
+            "last_end": "",
+        },
+    )
 
     g["total_seconds"] = int(g.get("total_seconds", 0)) + int(seconds)
     g["total_sessions"] = int(g.get("total_sessions", 0)) + 1
@@ -342,11 +327,6 @@ def add_session(d: dict, game_name: str, start_iso: str, end_iso: str, seconds: 
     sessions[game_name] = g
     d["sessions_json"] = sessions
 
-
-
-# ============================
-# RUTAS ACCOUNTS
-# ============================
 
 @app.route("/update_account", methods=["POST"])
 def update_account():
@@ -377,13 +357,8 @@ def update_account():
             }
         ), 404
 
-    acc = {}
-    for line in content.splitlines():
-        line = line.strip()
-        if not line or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        acc[k.strip()] = v.strip()
+    acc_full = parse_text_with_sessions(content)
+    acc = {k: v for k, v in acc_full.items() if k not in ("roles", "sessions_json")}
 
     ahora = datetime.now()
 
@@ -477,14 +452,20 @@ def update_account():
         acc["avatar_url"] = new_avatar_url
         acc["last_avatar_change_at"] = ahora.isoformat()
 
-    contenido = "\n".join(f"{k}={v}" for k, v in acc.items())
+    acc_full_updated = dict(acc_full)
+    acc_full_updated.update(acc)
+
+    contenido = dict_to_text_with_sessions(acc_full_updated)
     upload_account(current_username, contenido)
+
+    account_response = dict(acc)
+    account_response["sessions_json"] = acc_full_updated.get("sessions_json", {})
 
     return jsonify(
         {
             "error": False,
             "status": "Cuenta actualizada.",
-            "account": acc,
+            "account": account_response,
         }
     ), 200
 
@@ -547,7 +528,7 @@ def create_account():
         pass
 
     ahora = datetime.now().isoformat()
-    account_data = {
+    account_core = {
         "username": username,
         "password": password,
         "avatar_url": avatar_url,
@@ -556,7 +537,11 @@ def create_account():
         "last_avatar_change_at": ahora,
     }
 
-    contenido = "\n".join(f"{k}={v}" for k, v in account_data.items())
+    full_account = dict(account_core)
+    full_account["roles"] = {}
+    full_account["sessions_json"] = {}
+
+    contenido = dict_to_text_with_sessions(full_account)
     try:
         upload_account(username, contenido)
     except Exception as e:
@@ -568,17 +553,20 @@ def create_account():
             }
         ), 500
 
-    registry[username] = {"created_at": account_data["created_at"]}
+    registry[username] = {"created_at": account_core["created_at"]}
     try:
         upload_username_registry(registry)
     except Exception:
         pass
 
+    account_response = dict(account_core)
+    account_response["sessions_json"] = {}
+
     return jsonify(
         {
             "error": False,
             "status": "Cuenta creada correctamente.",
-            "account": account_data,
+            "account": account_response,
         }
     ), 201
 
@@ -610,15 +598,10 @@ def login_account():
             }
         ), 404
 
-    acc = {}
-    for line in content.splitlines():
-        line = line.strip()
-        if not line or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        acc[k.strip()] = v.strip()
+    acc_full = parse_text_with_sessions(content)
+    acc_core = {k: v for k, v in acc_full.items() if k not in ("roles", "sessions_json")}
 
-    if acc.get("password") != password:
+    if acc_core.get("password") != password:
         return jsonify(
             {
                 "error": True,
@@ -633,11 +616,14 @@ def login_account():
     except Exception:
         games = []
 
+    account_response = dict(acc_core)
+    account_response["sessions_json"] = acc_full.get("sessions_json", {})
+
     return jsonify(
         {
             "error": False,
             "status": "Inicio de sesión correcto.",
-            "account": acc,
+            "account": account_response,
             "games": games,
         }
     ), 200
@@ -654,10 +640,6 @@ def games():
 
     return jsonify({"error": False, "status": "ok", "files": zip_files}), 200
 
-
-# ============================
-# VALIDATE (LICENCIAS)
-# ============================
 
 @app.route("/validate", methods=["POST"])
 def validate():
@@ -689,16 +671,17 @@ def validate():
     except Exception:
         return jsonify({"error": True, "status": "Usuario no encontrado."}), 404
 
-    lic = parse_text_with_sessions(content)
+    lic_full = parse_text_with_sessions(content)
+    lic_core = {k: v for k, v in lic_full.items() if k not in ("roles", "sessions_json")}
 
-    if lic.get("pass") and lic["pass"] != password:
+    if lic_core.get("pass") and lic_core["pass"] != password:
         return jsonify({"error": True, "status": "Contraseña incorrecta."}), 403
 
-    expire_date = datetime.fromisoformat(lic.get("expires", "2100-01-01T00:00:00"))
+    expire_date = datetime.fromisoformat(lic_core.get("expires", "2100-01-01T00:00:00"))
     if datetime.now() > expire_date:
         return jsonify({"error": True, "status": "Licencia expirada."}), 403
 
-    is_global = lic.get("global", "false").lower() == "true"
+    is_global = lic_core.get("global", "false").lower() == "true"
 
     if not is_global:
         actualizado = False
@@ -711,15 +694,19 @@ def validate():
             ("disk", disk),
             ("ip", ip),
         ]:
-            if v and not lic.get(k):
-                lic[k] = v
+            if v and not lic_core.get(k):
+                lic_core[k] = v
                 actualizado = True
 
         if actualizado:
-            upload_license(username, dict_to_text_with_sessions(lic))
+            merged = dict(lic_full)
+            merged.update(lic_core)
+            upload_license(username, dict_to_text_with_sessions(merged))
+            lic_full = merged
+            lic_core = {k: v for k, v in lic_full.items() if k not in ("roles", "sessions_json")}
 
         for k, v in [("hwid", hwid), ("cpu_id", cpu_id), ("mac", mac)]:
-            if v and lic.get(k) and v != lic.get(k):
+            if v and lic_core.get(k) and v != lic_core.get(k):
                 return jsonify(
                     {"error": True, "status": f"{k.upper()} no coincide."}
                 ), 403
@@ -734,20 +721,19 @@ def validate():
     except Exception:
         game_files = []
 
+    license_response = dict(lic_core)
+    license_response["sessions_json"] = lic_full.get("sessions_json", {})
+
     return jsonify(
         {
             "error": False,
             "status": "Inicio de sesión correcto.",
-            "license": lic,
+            "license": license_response,
             "files": loader_files,
             "games": game_files,
         }
     ), 200
 
-
-# ============================
-# TRACKING SESIONES - LICENSE
-# ============================
 
 @app.route("/start_session_license", methods=["POST"])
 def start_session_license():
@@ -831,10 +817,6 @@ def end_session_license():
     ), 200
 
 
-# ============================
-# TRACKING SESIONES - ACCOUNT
-# ============================
-
 @app.route("/start_session_account", methods=["POST"])
 def start_session_account():
     data = request.json or {}
@@ -917,10 +899,6 @@ def end_session_account():
     ), 200
 
 
-# ============================
-# GET SESSIONS (LICENSE / ACCOUNT)
-# ============================
-
 @app.route("/sessions_license/<username>", methods=["GET"])
 def get_sessions_license(username):
     username = (username or "").strip()
@@ -952,10 +930,6 @@ def get_sessions_account(username):
     sessions = parse_sessions(d)
     return jsonify({"error": False, "status": "ok", "sessions": sessions}), 200
 
-
-# ============================
-# MAIN
-# ============================
 
 if __name__ == "__main__":
     import logging
