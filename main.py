@@ -196,6 +196,30 @@ def upload_account(username: str, content: str) -> bool:
     return True
 
 
+def rename_account_file(old_username: str, new_username: str) -> None:
+    """Renombra /accounts/old_username.txt -> /accounts/new_username.txt usando move_v2."""
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "from_path": f"/accounts/{old_username}.txt",
+        "to_path": f"/accounts/{new_username}.txt",
+        "autorename": False,
+        "allow_shared_folder": False,
+        "allow_ownership_transfer": False,
+    }
+    r = requests.post(
+        "https://api.dropboxapi.com/2/files/move_v2",
+        headers=headers,
+        json=data,
+    )
+    r.raise_for_status()
+    # si falla, lanzará excepción y lo capturamos desde update_account
+    # docs: files/move_v2 es la forma correcta de renombrar archivos en Dropbox [web:66][web:65]
+
+
 def download_username_registry() -> dict:
     token = get_access_token()
     headers = {
@@ -282,6 +306,7 @@ def update_account():
 
     old_username = acc.get("username", current_username)
 
+    # cambio de username
     if new_username and new_username != old_username:
         if ahora - last_username_change_at < min_delta:
             restante = min_delta - (ahora - last_username_change_at)
@@ -308,6 +333,20 @@ def update_account():
         registry[new_username] = {"created_at": created}
         upload_username_registry(registry)
 
+        # renombrar archivo en Dropbox
+        try:
+            rename_account_file(current_username, new_username)
+        except Exception as e:
+            return jsonify({
+                "error": True,
+                "code": "ACCOUNT_RENAME_ERROR",
+                "status": f"No se pudo renombrar el archivo de cuenta: {e}",
+            }), 500
+
+        # a partir de aquí el archivo ya se llama new_username.txt
+        current_username = new_username
+
+    # cambio de password
     if new_password:
         if len(new_password) < 4:
             return jsonify({
@@ -317,6 +356,7 @@ def update_account():
             }), 400
         acc["password"] = new_password
 
+    # cambio de avatar
     if new_avatar_url and new_avatar_url != acc.get("avatar_url"):
         if ahora - last_avatar_change_at < min_delta:
             restante = min_delta - (ahora - last_avatar_change_at)
