@@ -327,12 +327,21 @@ def parse_sessions(d: dict) -> dict:
 
 def add_session(d: dict, game_name: str, start_iso: str, end_iso: str, seconds: int):
     sessions = parse_sessions(d)
-    if game_name not in sessions:
-        sessions[game_name] = []
-    sessions[game_name].append(
-        {"start": start_iso, "end": end_iso, "seconds": int(seconds)}
-    )
+    g = sessions.get(game_name, {
+        "total_seconds": 0,
+        "total_sessions": 0,
+        "last_start": "",
+        "last_end": "",
+    })
+
+    g["total_seconds"] = int(g.get("total_seconds", 0)) + int(seconds)
+    g["total_sessions"] = int(g.get("total_sessions", 0)) + 1
+    g["last_start"] = start_iso
+    g["last_end"] = end_iso
+
+    sessions[game_name] = g
     d["sessions_json"] = sessions
+
 
 
 # ============================
