@@ -723,6 +723,7 @@ def validate():
 
     license_response = dict(lic_core)
     license_response["sessions_json"] = lic_full.get("sessions_json", {})
+    license_response["roles"] = lic_full.get("roles", {})
 
     return jsonify(
         {
